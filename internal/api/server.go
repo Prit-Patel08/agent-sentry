@@ -149,13 +149,11 @@ func HandleIncidents(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
-	db := database.GetDB()
-	if db == nil {
+	if database.GetDB() == nil {
 		if err := database.InitDB(); err != nil {
 			http.Error(w, "Database not initialized", http.StatusInternalServerError)
 			return
 		}
-		db = database.GetDB()
 	}
 
 	incidents, err := database.GetAllIncidents()

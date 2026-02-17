@@ -28,7 +28,7 @@ func Init() error {
 		return nil
 	}
 
-	return fmt.Errorf("SENTRY_MASTER_KEY environment variable is NOT set. Security policy requires an explicit master key for encryption.")
+	return fmt.Errorf("SENTRY_MASTER_KEY environment variable is NOT set; security policy requires an explicit master key for encryption")
 }
 
 // Encrypt encrypts plain text using AES-GCM.
