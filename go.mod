@@ -1,6 +1,6 @@
 module agent-sentry
 
-go 1.25.5
+go 1.25
 
 require (
 	github.com/adrg/strutil v0.3.1
