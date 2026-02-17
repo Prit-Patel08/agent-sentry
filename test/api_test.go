@@ -105,8 +105,8 @@ func TestKillEndpointNoKeySetIsOpen(t *testing.T) {
 
 	resp := w.Result()
 
-	// Should not be 401 when no key is set
-	if resp.StatusCode == http.StatusUnauthorized {
-		t.Error("Expected open access when SENTRY_API_KEY is not set, but got 401")
+	// Should be 403 Forbidden when no key is set (Mutations blocked for security)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden when SENTRY_API_KEY is not set, but got %d", resp.StatusCode)
 	}
 }
