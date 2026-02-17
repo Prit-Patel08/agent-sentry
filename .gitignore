@@ -1,0 +1,37 @@
+# Binaries
+sentry
+*.exe
+*.dll
+
+# Database and Keys
+sentry.db
+sentry.key
+*.sqlite
+
+# Logs and Temp
+*.log
+incident_*.md
+logs/
+
+# Go
+go.sum
+vendor/
+
+# Node
+node_modules/
+.next/
+out/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# Test Artifacts
+malicious_*.py
