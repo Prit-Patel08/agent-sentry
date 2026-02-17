@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -44,14 +45,22 @@ func initConfig() {
 
 	viper.AutomaticEnv()
 
-	if err := viper.ReadInConfig(); err == nil {
-		if verbose {
-			fmt.Println("Using config file:", viper.ConfigFileUsed())
+	if err := viper.ReadInConfig(); err != nil {
+		if cfgFile != "" {
+			fmt.Printf("Failed to read config file %q: %v\n", cfgFile, err)
+			os.Exit(1)
 		}
+	} else if verbose {
+		fmt.Println("Using config file:", viper.ConfigFileUsed())
 	}
 
 	// Resolve active profile
 	resolveProfile()
+
+	if err := validateConfig(); err != nil {
+		fmt.Printf("Configuration validation failed: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // resolveProfile merges the active profile's settings into the top-level Viper keys.

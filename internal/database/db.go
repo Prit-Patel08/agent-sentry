@@ -4,6 +4,7 @@ import (
 	"agent-sentry/internal/encryption"
 	"database/sql"
 	"fmt"
+	"os"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -26,7 +27,10 @@ type Incident struct {
 }
 
 func InitDB() error {
-	dbPath := "sentry.db"
+	dbPath := os.Getenv("SENTRY_DB_PATH")
+	if dbPath == "" {
+		dbPath = "sentry.db"
+	}
 	var err error
 
 	db, err = sql.Open("sqlite3", dbPath)

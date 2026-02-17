@@ -20,4 +20,7 @@ This repository implements:
 - **Zero-Shell Execution**: No use of `sh -c`. Arguments are passed as structured slices.
 - **Strict Network Binding**: Dashboard API binds to `127.0.0.1` by default.
 - **Constant-Time Auth**: API key comparisons use `subtle.ConstantTimeCompare`.
+- **Brute-Force Resistance**: Auth failures are throttled and blocked.
+- **Rate Limiting**: API request bursts are constrained per client IP.
 - **In-Memory State**: Runtime data is kept in memory with `sync.RWMutex`, not written to shared files.
+- **Secret Redaction**: Common token/key patterns are redacted before dashboard exposure.

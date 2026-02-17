@@ -19,8 +19,9 @@ sentry_report_*.md
 logs/
 
 # Go
-go.sum
 vendor/
+.gocache/
+bin/
 
 # Node
 node_modules/
@@ -41,8 +42,5 @@ __pycache__/
 # Test Artifacts
 malicious_*.py
 agent_feedback.txt
-*.py
-EOF
-sentry.key
-.sentry_live
-sentry.db
+stuck.py
+fuzzy_stuck.py

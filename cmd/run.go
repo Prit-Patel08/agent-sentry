@@ -4,6 +4,7 @@ import (
 	"agent-sentry/internal/database"
 	"agent-sentry/internal/feedback"
 	"agent-sentry/internal/patterns"
+	"agent-sentry/internal/redact"
 	"agent-sentry/internal/state"
 	"agent-sentry/internal/sysmon"
 	"agent-sentry/internal/tokens"
@@ -116,6 +117,9 @@ func (l *LogObserver) Write(p []byte) (n int, err error) {
 }
 
 func (l *LogObserver) addLine(line string) {
+	// Prevent token/key leakage to state/dashboard surfaces.
+	line = redact.Line(line)
+
 	l.lines[l.index] = line
 	l.index++
 	if l.index >= l.capacity {
@@ -179,6 +183,26 @@ func NormalizeLog(line string) string {
 	line = reNum.ReplaceAllString(line, "<NUM>")
 
 	return line
+}
+
+func terminateProcessGroupGracefully(pid int, timeout time.Duration) {
+	if pid <= 0 {
+		return
+	}
+
+	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	_ = syscall.Kill(pid, syscall.SIGTERM)
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); err != nil {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	_ = syscall.Kill(pid, syscall.SIGKILL)
 }
 
 func runProcess(args []string) {
@@ -256,6 +280,7 @@ func runProcess(args []string) {
 	var lastWatchdogAlert time.Time
 	var watchdogEscalationLevel int = 0
 	var initialFDs int = 0
+	var sentryTerminated atomic.Bool
 
 	// Create Monitor instance
 	monitor := sysmon.NewMonitor()
@@ -458,13 +483,10 @@ func runProcess(args []string) {
 									pid,
 								)
 
-								// Kill the process group
-								if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
-									cmd.Process.Kill()
-								}
-
+								sentryTerminated.Store(true)
+								terminateProcessGroupGracefully(pid, 2*time.Second)
+								cancel()
 								fmt.Println("Synthetic Error: Loop detected. Terminating process.")
-								os.Exit(1)
 								return
 							}
 						}
@@ -486,9 +508,9 @@ func runProcess(args []string) {
 							finalCost := tokens.EstimateCost(finalTokens, modelName)
 							database.LogIncident(fullCommand, modelName, "SAFETY_LIMIT_EXCEEDED", cpuUsage, fmt.Sprintf("Memory Limit: %.2fMB", memMB), time.Since(startTime).Seconds(), finalTokens, finalCost, agentID, agentVersion)
 
-							if err := cmd.Process.Kill(); err != nil {
-								syscall.Kill(-pid, syscall.SIGKILL)
-							}
+							sentryTerminated.Store(true)
+							terminateProcessGroupGracefully(pid, 2*time.Second)
+							cancel()
 							return
 						}
 					}
@@ -508,9 +530,9 @@ func runProcess(args []string) {
 							finalCost := tokens.EstimateCost(finalTokens, modelName)
 							database.LogIncident(fullCommand, modelName, "SAFETY_LIMIT_EXCEEDED", cpuUsage, fmt.Sprintf("Token Rate: %.0f/min", rate), time.Since(startTime).Seconds(), finalTokens, finalCost, agentID, agentVersion)
 
-							if err := cmd.Process.Kill(); err != nil {
-								syscall.Kill(-pid, syscall.SIGKILL)
-							}
+							sentryTerminated.Store(true)
+							terminateProcessGroupGracefully(pid, 2*time.Second)
+							cancel()
 							return
 						}
 					}
@@ -522,6 +544,7 @@ func runProcess(args []string) {
 	// Signal Handling Goroutine
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 
 	var userTerminated atomic.Bool
 
@@ -546,9 +569,8 @@ func runProcess(args []string) {
 			pid,
 		)
 
-		if err := syscall.Kill(-pid, sig.(syscall.Signal)); err != nil {
-			cmd.Process.Signal(sig)
-		}
+		terminateProcessGroupGracefully(pid, 3*time.Second)
+		cancel()
 	}()
 
 	err := cmd.Wait()
@@ -576,7 +598,14 @@ func runProcess(args []string) {
 				finalCost := tokens.EstimateCost(finalTokens, modelName)
 				database.LogIncident(fullCommand, modelName, "COMMAND_FAILURE", maxObservedCpu, "N/A", time.Since(startTime).Seconds(), finalTokens, finalCost, agentID, agentVersion)
 			}
-			os.Exit(exitErr.ExitCode())
+			if sentryTerminated.Load() {
+				os.Exit(1)
+			}
+			code := exitErr.ExitCode()
+			if code < 0 {
+				code = 1
+			}
+			os.Exit(code)
 		} else {
 			fmt.Printf("Command finished with error: %v\n", err)
 			if !userTerminated.Load() {
@@ -588,6 +617,9 @@ func runProcess(args []string) {
 		}
 	} else {
 		fmt.Printf("DEBUG: Wait success | UserTerminated: %v\n", userTerminated.Load())
+		if sentryTerminated.Load() {
+			os.Exit(1)
+		}
 		// Success
 	}
 }

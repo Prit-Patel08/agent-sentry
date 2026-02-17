@@ -22,7 +22,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o probe agent-sentry/cmd/healthcheck
 # Final stage
 FROM gcr.io/distroless/static-debian12
 
-WORKDIR /
+WORKDIR /tmp
 
 # Copy binaries
 COPY --from=builder /app/sentry /sentry
@@ -38,5 +38,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD ["/probe"]
 
-# Run as non-root
+# Runtime hardening knobs (enforce with docker run flags in docs).
+ENV GODEBUG=madvdontneed=1
 ENTRYPOINT ["/sentry", "run"]

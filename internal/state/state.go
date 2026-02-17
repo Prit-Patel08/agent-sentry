@@ -28,12 +28,14 @@ func UpdateState(cpu float64, lastLine, status, command string, args []string, d
 	mu.Lock()
 	defer mu.Unlock()
 
+	argsCopy := append([]string(nil), args...)
+
 	currentState = ProcessState{
 		CPU:       cpu,
 		LastLine:  lastLine,
 		Status:    status,
 		Command:   command,
-		Args:      args,
+		Args:      argsCopy,
 		Dir:       dir,
 		PID:       pid,
 		Timestamp: time.Now().UnixMilli(),

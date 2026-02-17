@@ -1,13 +1,17 @@
 # Build stage
-FROM golang:1.21 AS builder
+FROM golang:1.23-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /sentry ./cmd
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /sentry .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /probe ./cmd/healthcheck
 
 # Final stage
 FROM gcr.io/distroless/static-debian12
+WORKDIR /tmp
 COPY --from=builder /sentry /sentry
+COPY --from=builder /probe /probe
 USER 65532:65532
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD ["/probe"]
 ENTRYPOINT ["/sentry", "run"]

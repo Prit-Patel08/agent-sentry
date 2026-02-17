@@ -2,6 +2,7 @@ package api
 
 import (
 	"agent-sentry/internal/database"
+	"agent-sentry/internal/metrics"
 	"agent-sentry/internal/state"
 	"context"
 	"crypto/subtle"
@@ -17,79 +18,124 @@ import (
 	"time"
 )
 
+var (
+	apiMetrics  = metrics.NewStore()
+	apiLimiter  = newRateLimiter(120, 10, 10*time.Minute)
+	allowedCORS = "http://localhost:3000"
+)
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(status int) {
+	s.status = status
+	s.ResponseWriter.WriteHeader(status)
+}
+
 func corsMiddleware(w http.ResponseWriter) {
-	// Strict CORS: Allow Dashboard (localhost:3000) or local tools
-	// In production, this should be configurable via env, but for now we lock it down.
-	w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
+	origin := os.Getenv("SENTRY_ALLOWED_ORIGIN")
+	if origin == "" {
+		origin = allowedCORS
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 }
 
+func withSecurity(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		corsMiddleware(rec)
+
+		if r.Method == "OPTIONS" {
+			rec.WriteHeader(http.StatusOK)
+			apiMetrics.IncRequest(r.URL.Path, r.Method, rec.status)
+			return
+		}
+
+		if !apiLimiter.allow(clientIP(r.RemoteAddr)) {
+			http.Error(rec, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)
+			apiMetrics.IncRequest(r.URL.Path, r.Method, rec.status)
+			return
+		}
+
+		next(rec, r)
+		apiMetrics.IncRequest(r.URL.Path, r.Method, rec.status)
+	}
+}
+
 // requireAuth checks the SENTRY_API_KEY env var.
-// POLICY:
-//   - GET requests: If NO key set, allowed (Dev mode). If key set, require it.
-//   - POST requests: ALWAYS require key? Or allow if NO key set (Dev mode)?
-//     Security Audit said: "All mutating endpoints require auth by default".
-//     But if user just downloaded it and ran it... they didn't set a key.
-//     Proposed Middle Ground: POST requires key IF key is set.
-//     Wait, audit said: "Dev mode is still safe".
-//     If we create a random key on startup and print it? That's the safest.
-//     For now, we will enforce: POST requests MUST have Auth if Sentry is running in "Secure Mode" (Key set).
-//     Refined Policy:
-//   - If SENTRY_API_KEY is set: All requests must match.
-//   - If NOT set: POST requests are BLOCKED for security (Force user to set key for control).
+// If no key is set, mutating endpoints are blocked.
 func requireAuth(w http.ResponseWriter, r *http.Request) bool {
+	ip := clientIP(r.RemoteAddr)
 	apiKey := os.Getenv("SENTRY_API_KEY")
 
 	if apiKey == "" {
 		if r.Method == "POST" {
-			// Block dangerous actions if no key is configured
 			http.Error(w, `{"error":"Security Alert: You must set SENTRY_API_KEY environment variable to perform mutations."}`, http.StatusForbidden)
 			return false
 		}
-		return true // Allow Read-Only access in Dev Mode
+		return true
 	}
 
 	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		apiMetrics.IncAuthFailure()
+		if apiLimiter.addAuthFailure(ip) {
+			http.Error(w, `{"error":"Too many failed auth attempts. Retry later."}`, http.StatusTooManyRequests)
+			return false
+		}
 		http.Error(w, `{"error":"Authorization required"}`, http.StatusUnauthorized)
 		return false
 	}
 
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	// Constant-time comparison to prevent timing attacks
+	token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
 	if subtle.ConstantTimeCompare([]byte(token), []byte(apiKey)) != 1 {
+		apiMetrics.IncAuthFailure()
+		if apiLimiter.addAuthFailure(ip) {
+			http.Error(w, `{"error":"Too many failed auth attempts. Retry later."}`, http.StatusTooManyRequests)
+			return false
+		}
 		http.Error(w, `{"error":"Invalid API key"}`, http.StatusForbidden)
 		return false
 	}
 
+	apiLimiter.clearAuthFailures(ip)
 	return true
 }
 
 func StartServer(port string) {
-	http.HandleFunc("/stream", handleStream)
-	http.HandleFunc("/incidents", HandleIncidents)
-	http.HandleFunc("/process/kill", HandleProcessKill)
-	http.HandleFunc("/process/restart", HandleProcessRestart)
-	fmt.Printf("Starting Dashboard API on port %s...\n", port)
-
 	apiKey := os.Getenv("SENTRY_API_KEY")
 	if apiKey != "" {
 		fmt.Println("🔒 API Key authentication ENABLED for /process/* endpoints")
 	} else {
-		fmt.Println("⚠️  No SENTRY_API_KEY set — /process/* endpoints are OPEN")
+		fmt.Println("⚠️  No SENTRY_API_KEY set - mutating endpoints are blocked")
 	}
 
-	// PROD HARDENING: Bind strictly to 127.0.0.1 to avoid external exposure
-	addr := "127.0.0.1:" + port
+	mux := http.NewServeMux()
+	mux.HandleFunc("/stream", withSecurity(handleStream))
+	mux.HandleFunc("/incidents", withSecurity(HandleIncidents))
+	mux.HandleFunc("/process/kill", withSecurity(HandleProcessKill))
+	mux.HandleFunc("/process/restart", withSecurity(HandleProcessRestart))
+	mux.HandleFunc("/healthz", withSecurity(HandleHealth))
+	mux.HandleFunc("/readyz", withSecurity(HandleReady))
+	mux.HandleFunc("/metrics", withSecurity(HandleMetrics))
+
+	addr := resolveBindAddr(port)
 	server := &http.Server{
-		Addr:    addr,
-		Handler: nil, // Use DefaultServeMux
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
-	// Graceful shutdown setup
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(stop)
 
 	go func() {
 		fmt.Printf("API listening on %s\n", addr)
@@ -105,20 +151,32 @@ func StartServer(port string) {
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server Shutdown Failed: %v", err)
+		log.Fatalf("Server shutdown failed: %v", err)
 	}
 	fmt.Println("[API] Server stopped")
 }
 
+func resolveBindAddr(port string) string {
+	// Keep local-only binding unless explicitly asked for localhost alias.
+	host := os.Getenv("SENTRY_BIND_HOST")
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if host != "127.0.0.1" && host != "localhost" {
+		fmt.Printf("[API] Refusing non-local bind host %q. Falling back to 127.0.0.1.\n", host)
+		host = "127.0.0.1"
+	}
+	return host + ":" + port
+}
+
 func handleStream(w http.ResponseWriter, r *http.Request) {
-	corsMiddleware(w) // Enforce restricted CORS for stream as well
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
 		return
 	}
 
@@ -139,11 +197,68 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HandleHealth returns process health for container liveness.
+func HandleHealth(w http.ResponseWriter, r *http.Request) {
+	corsMiddleware(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// HandleReady checks DB readiness for startup probes.
+func HandleReady(w http.ResponseWriter, r *http.Request) {
+	corsMiddleware(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if database.GetDB() == nil {
+		if err := database.InitDB(); err != nil {
+			http.Error(w, `{"status":"not-ready"}`, http.StatusServiceUnavailable)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
+}
+
+// HandleMetrics emits Prometheus-style metrics.
+func HandleMetrics(w http.ResponseWriter, r *http.Request) {
+	corsMiddleware(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	st := state.GetState()
+	active := st.Status != "STOPPED" && st.PID > 0
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	_, _ = fmt.Fprint(w, apiMetrics.Prometheus(active))
+}
+
 // HandleIncidents is exported for testing.
 func HandleIncidents(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w)
-
-	if r.Method == "OPTIONS" {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -170,41 +285,34 @@ func HandleIncidents(w http.ResponseWriter, r *http.Request) {
 // HandleProcessKill is exported for testing.
 func HandleProcessKill(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w)
-
-	if r.Method == "OPTIONS" {
+	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-
-	if r.Method != "POST" {
+	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Auth check
 	if !requireAuth(w, r) {
 		return
 	}
 
-	// Read from in-memory state
 	stats := state.GetState()
-
 	if stats.Status == "STOPPED" || stats.PID == 0 {
 		http.Error(w, `{"error":"No active process to kill"}`, http.StatusBadRequest)
 		return
 	}
 
-	// Kill the process group (negative PID targets the group)
 	if err := syscall.Kill(-stats.PID, syscall.SIGKILL); err != nil {
-		// Try killing just the process
 		if err2 := syscall.Kill(stats.PID, syscall.SIGKILL); err2 != nil {
 			http.Error(w, fmt.Sprintf(`{"error":"Failed to kill process: %v"}`, err2), http.StatusInternalServerError)
 			return
 		}
 	}
 
-	// Update State to STOPPED
 	state.UpdateState(0, "", "STOPPED", stats.Command, stats.Args, stats.Dir, stats.PID)
+	apiMetrics.IncProcessKill()
 
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"status":"killed","pid":%d}`, stats.PID)
@@ -213,52 +321,36 @@ func HandleProcessKill(w http.ResponseWriter, r *http.Request) {
 // HandleProcessRestart is exported for testing.
 func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w)
-
-	if r.Method == "OPTIONS" {
+	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-
-	if r.Method != "POST" {
+	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Auth check
 	if !requireAuth(w, r) {
 		return
 	}
 
-	// Read state
 	stats := state.GetState()
-
-	if stats.Command == "" {
+	if stats.Command == "" || len(stats.Args) == 0 {
 		http.Error(w, `{"error":"No command available to restart"}`, http.StatusBadRequest)
 		return
 	}
 
-	// Kill existing process if running
 	if stats.Status != "STOPPED" && stats.PID > 0 {
-		syscall.Kill(-stats.PID, syscall.SIGKILL)
-		time.Sleep(500 * time.Millisecond) // Brief wait for cleanup
+		_ = syscall.Kill(-stats.PID, syscall.SIGKILL)
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	// Restart in background
 	go func() {
-		var cmd *exec.Cmd
-		if len(stats.Args) > 0 {
-			// Secure path: execute directly without shell
-			cmd = exec.Command(stats.Args[0], stats.Args[1:]...)
-			if stats.Dir != "" {
-				cmd.Dir = stats.Dir
-			}
-			fmt.Printf("[API] 🛡️ Secure Restart: %v\n", stats.Args)
-		} else {
-			// Legacy fallback removed for security
-			fmt.Printf("[API] ❌ Restart REJECTED: Process has no structured arguments.\n")
-			return
+		cmd := exec.Command(stats.Args[0], stats.Args[1:]...)
+		if stats.Dir != "" {
+			cmd.Dir = stats.Dir
 		}
-
+		fmt.Printf("[API] Secure restart: %v\n", stats.Args)
 		if err := cmd.Start(); err != nil {
 			fmt.Printf("[API] Failed to restart command: %v\n", err)
 			return
@@ -266,6 +358,7 @@ func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("[API] Restarted process with PID: %d\n", cmd.Process.Pid)
 	}()
 
+	apiMetrics.IncProcessRestart()
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"status":"restarting","command":"%s"}`, stats.Command)
 }

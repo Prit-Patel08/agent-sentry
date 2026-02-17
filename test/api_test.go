@@ -110,3 +110,38 @@ func TestKillEndpointNoKeySetIsOpen(t *testing.T) {
 		t.Errorf("Expected 403 Forbidden when SENTRY_API_KEY is not set, but got %d", resp.StatusCode)
 	}
 }
+
+func TestHealthEndpoint(t *testing.T) {
+	req := httptest.NewRequest("GET", "/healthz", nil)
+	w := httptest.NewRecorder()
+
+	api.HandleHealth(w, req)
+	resp := w.Result()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestKillEndpointBruteForceBlocked(t *testing.T) {
+	os.Setenv("SENTRY_API_KEY", "test-secret-key-12345")
+	defer os.Unsetenv("SENTRY_API_KEY")
+
+	for i := 0; i < 11; i++ {
+		req := httptest.NewRequest("POST", "/process/kill", nil)
+		req.RemoteAddr = "198.51.100.77:1234"
+		req.Header.Set("Authorization", "Bearer wrong-key")
+		w := httptest.NewRecorder()
+		api.HandleProcessKill(w, req)
+	}
+
+	req := httptest.NewRequest("POST", "/process/kill", nil)
+	req.RemoteAddr = "198.51.100.77:1234"
+	req.Header.Set("Authorization", "Bearer wrong-key")
+	w := httptest.NewRecorder()
+	api.HandleProcessKill(w, req)
+
+	if w.Result().StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after repeated auth failures, got %d", w.Result().StatusCode)
+	}
+}

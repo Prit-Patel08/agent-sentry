@@ -18,6 +18,7 @@ This allows the Next.js dashboard to query incident history.
 		fmt.Println("Starting Dashboard API...")
 		fmt.Println("Frontend initialized in ./dashboard. Run 'npm run dev' there to start the UI.")
 		fmt.Println("API Status: http://localhost:8080/incidents")
+		fmt.Println("Health: http://localhost:8080/healthz | Metrics: http://localhost:8080/metrics")
 
 		api.StartServer("8080")
 	},

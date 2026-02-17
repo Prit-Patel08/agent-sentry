@@ -1,45 +1,56 @@
 # Agent-Sentry
 
-**Autonomous Supervision & Security Layer for AI Agents.**
+Autonomous supervision and security layer for AI agent subprocesses.
 
-## Hardened Architecture (v2.0)
+## Security and Reliability Highlights
 
-This version represents a production-hardened refactor focusing on Zero-Shell execution, strict network isolation, and high-performance monitoring.
+- Zero-shell execution path (`exec.Command` with structured args)
+- Local-only API binding (`127.0.0.1` / `localhost`)
+- Constant-time API key checks
+- API request throttling + auth brute-force protection
+- In-memory runtime state guarded by `sync.RWMutex`
+- Secret redaction before dashboard/state exposure
+- Graceful process-group shutdown with forced fallback
 
-### Key Features
-- **Zero-Shell Restarts**: Structured argument execution eliminates command injection risks.
-- **Native Monitoring**: `gopsutil` integration replaces legacy `lsof`/`ps` shelling.
-- **In-Memory State**: Thread-safe state management with `sync.RWMutex`.
-- **API Security**: 127.0.0.1 binding and constant-time API key comparisons.
+## API Endpoints
 
-## Production Deployment
+- `GET /incidents`
+- `GET /stream`
+- `POST /process/kill`
+- `POST /process/restart`
+- `GET /healthz`
+- `GET /readyz`
+- `GET /metrics`
 
-### 1. Docker (Hardened)
+## Configuration
 
-```bash
-docker build -t agent-sentry .
-docker run -p 8080:8080 \
-  -e SENTRY_API_KEY=$(openssl rand -hex 32) \
-  -e SENTRY_MASTER_KEY=$(openssl rand -hex 32) \
-  agent-sentry
-```
-
-### 2. Configuration
-
-Set the following environment variables:
-- `SENTRY_API_KEY`: Required for Kill/Restart API actions.
-- `SENTRY_MASTER_KEY`: 64-char hex string for DB encryption.
-
----
+- Config file: `sentry.yaml` (or `--config`)
+- Environment:
+  - `SENTRY_API_KEY` for mutating API endpoints
+  - `SENTRY_MASTER_KEY` for DB field encryption (64 hex chars)
+  - `SENTRY_ALLOWED_ORIGIN` for CORS allow-list (default `http://localhost:3000`)
+  - `SENTRY_BIND_HOST` (`127.0.0.1`/`localhost` only)
+  - `NEXT_PUBLIC_SENTRY_API_BASE` for dashboard base URL
 
 ## Development
 
 ```bash
-# Build
 go build ./...
-
-# Test with Race Detector
-go test -v -race ./...
+go test ./... -v
+go test ./... -race -v
+go test ./test -bench . -benchmem -run '^$'
 ```
 
-See [SECURITY.md](SECURITY.md) for more hardening details.
+Dashboard:
+
+```bash
+cd dashboard
+npm ci
+npm run build
+```
+
+## Security Documentation
+
+- Threat model: `docs/THREAT_MODEL.md`
+- Operations guide: `docs/OPERATIONS.md`
+- Security policy: `SECURITY.md`
