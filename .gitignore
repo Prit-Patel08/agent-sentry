@@ -42,5 +42,3 @@ __pycache__/
 # Test Artifacts
 malicious_*.py
 agent_feedback.txt
-stuck.py
-fuzzy_stuck.py

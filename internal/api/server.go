@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -21,7 +22,12 @@ import (
 var (
 	apiMetrics  = metrics.NewStore()
 	apiLimiter  = newRateLimiter(120, 10, 10*time.Minute)
-	allowedCORS = "http://localhost:3000"
+	allowedCORS = []string{
+		"http://localhost:3000",
+		"http://localhost",
+		"http://127.0.0.1:3000",
+		"http://127.0.0.1",
+	}
 )
 
 type statusRecorder struct {
@@ -34,20 +40,40 @@ func (s *statusRecorder) WriteHeader(status int) {
 	s.ResponseWriter.WriteHeader(status)
 }
 
-func corsMiddleware(w http.ResponseWriter) {
-	origin := os.Getenv("SENTRY_ALLOWED_ORIGIN")
-	if origin == "" {
-		origin = allowedCORS
+func corsMiddleware(w http.ResponseWriter, r *http.Request) {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+
+	allowed := make(map[string]struct{}, len(allowedCORS)+1)
+	for _, o := range allowedCORS {
+		allowed[o] = struct{}{}
 	}
+
+	if envOrigin := strings.TrimSpace(os.Getenv("SENTRY_ALLOWED_ORIGIN")); envOrigin != "" && isLocalOrigin(envOrigin) {
+		allowed[envOrigin] = struct{}{}
+	}
+
+	if _, ok := allowed[origin]; !ok {
+		origin = "http://localhost:3000"
+	}
+
 	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 }
 
+func isLocalOrigin(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "localhost" || host == "127.0.0.1"
+}
+
 func withSecurity(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		corsMiddleware(rec)
+		corsMiddleware(rec, r)
 
 		if r.Method == "OPTIONS" {
 			rec.WriteHeader(http.StatusOK)
@@ -199,7 +225,7 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 
 // HandleHealth returns process health for container liveness.
 func HandleHealth(w http.ResponseWriter, r *http.Request) {
-	corsMiddleware(w)
+	corsMiddleware(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -214,7 +240,7 @@ func HandleHealth(w http.ResponseWriter, r *http.Request) {
 
 // HandleReady checks DB readiness for startup probes.
 func HandleReady(w http.ResponseWriter, r *http.Request) {
-	corsMiddleware(w)
+	corsMiddleware(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -235,7 +261,7 @@ func HandleReady(w http.ResponseWriter, r *http.Request) {
 
 // HandleMetrics emits Prometheus-style metrics.
 func HandleMetrics(w http.ResponseWriter, r *http.Request) {
-	corsMiddleware(w)
+	corsMiddleware(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -252,7 +278,7 @@ func HandleMetrics(w http.ResponseWriter, r *http.Request) {
 
 // HandleIncidents is exported for testing.
 func HandleIncidents(w http.ResponseWriter, r *http.Request) {
-	corsMiddleware(w)
+	corsMiddleware(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -284,7 +310,7 @@ func HandleIncidents(w http.ResponseWriter, r *http.Request) {
 
 // HandleProcessKill is exported for testing.
 func HandleProcessKill(w http.ResponseWriter, r *http.Request) {
-	corsMiddleware(w)
+	corsMiddleware(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -320,7 +346,7 @@ func HandleProcessKill(w http.ResponseWriter, r *http.Request) {
 
 // HandleProcessRestart is exported for testing.
 func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
-	corsMiddleware(w)
+	corsMiddleware(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
