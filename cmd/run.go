@@ -1,16 +1,16 @@
 package cmd
 
 import (
-	"agent-sentry/internal/api"
-	"agent-sentry/internal/database"
-	"agent-sentry/internal/feedback"
-	"agent-sentry/internal/patterns"
-	"agent-sentry/internal/redact"
-	"agent-sentry/internal/state"
-	"agent-sentry/internal/sysmon"
-	"agent-sentry/internal/tokens"
 	"bytes"
 	"context"
+	"flowforge/internal/api"
+	"flowforge/internal/database"
+	"flowforge/internal/feedback"
+	"flowforge/internal/patterns"
+	"flowforge/internal/redact"
+	"flowforge/internal/state"
+	"flowforge/internal/sysmon"
+	"flowforge/internal/tokens"
 	"fmt"
 	"io"
 	"os"
@@ -43,10 +43,10 @@ var runCmd = &cobra.Command{
 	Short: "Run a command with supervision",
 	Long: `Starts a subprocess, captures its stdout/stderr, and monitors its CPU usage.
 Example:
-  agent-sentry run --model gpt-4 -- python3 script.py
-  agent-sentry run --max-cpu 80.0 -- ./my-binary
-  agent-sentry run --no-kill -- python3 stuck.py   (watchdog mode)
-  agent-sentry run --inject-feedback agent_feedback.txt -- python3 agent.py`,
+  flowforge run --model gpt-4 -- python3 script.py
+  flowforge run --max-cpu 80.0 -- ./my-binary
+  flowforge run --no-kill -- python3 stuck.py   (watchdog mode)
+  flowforge run --inject-feedback agent_feedback.txt -- python3 agent.py`,
 	Args: cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		// Resolve max-cpu: CLI flag takes priority, then profile/config
@@ -247,7 +247,7 @@ func runProcess(args []string) {
 	defer database.CloseDB()
 
 	// Start API server in background
-	fmt.Println("[Sentry] Starting API server on port 8080...")
+	fmt.Println("[FlowForge] Starting API server on port 8080...")
 	stopAPI := api.Start("8080")
 	defer stopAPI()
 
@@ -272,9 +272,9 @@ func runProcess(args []string) {
 	// Generate transient Agent ID for this run
 	agentID := uuid.New().String()
 	agentVersion := "1.0.0"
-	fmt.Printf("[Sentry] 🆔 Agent ID: %s (v%s)\n", agentID, agentVersion)
+	fmt.Printf("[FlowForge] 🆔 Agent ID: %s (v%s)\n", agentID, agentVersion)
 
-	fmt.Printf("[Sentry] Config: max-cpu=%.1f%%, poll-interval=%dms, log-window=%d, no-kill=%v\n",
+	fmt.Printf("[FlowForge] Config: max-cpu=%.1f%%, poll-interval=%dms, log-window=%d, no-kill=%v\n",
 		maxCpu, pollInterval, logWindow, noKill)
 
 	// Create a context that can be cancelled
@@ -297,9 +297,9 @@ func runProcess(args []string) {
 	if injectFeedback != "" {
 		feedbackContent, err := feedback.ReadFeedback(injectFeedback)
 		if err != nil {
-			fmt.Printf("[Sentry] Warning: Could not read feedback file: %v\n", err)
+			fmt.Printf("[FlowForge] Warning: Could not read feedback file: %v\n", err)
 		} else {
-			fmt.Printf("[Sentry] 💉 Injecting feedback from: %s\n", injectFeedback)
+			fmt.Printf("[FlowForge] 💉 Injecting feedback from: %s\n", injectFeedback)
 			cmd.Stdin = strings.NewReader(feedbackContent)
 			// Clean up after injection
 			defer feedback.CleanupFeedback(injectFeedback)
@@ -321,7 +321,7 @@ func runProcess(args []string) {
 	var lastDecisionTrace time.Time
 	var watchdogEscalationLevel int = 0
 	var initialFDs int = 0
-	var sentryTerminated atomic.Bool
+	var flowforgeTerminated atomic.Bool
 
 	// Create Monitor instance
 	monitor := sysmon.NewMonitor()
@@ -333,7 +333,7 @@ func runProcess(args []string) {
 
 		p, err := process.NewProcess(int32(pid))
 		if err != nil {
-			fmt.Printf("[Sentry] Error attaching monitor to PID %d: %v\n", pid, err)
+			fmt.Printf("[FlowForge] Error attaching monitor to PID %d: %v\n", pid, err)
 			return
 		}
 
@@ -397,7 +397,7 @@ func runProcess(args []string) {
 				status := "RUNNING"
 				if isProbing {
 					status = "PROBING_DETECTED"
-					fmt.Printf("\n[Sentry] 🚨 PROBING DETECTED: %s\n", sysStatsStr)
+					fmt.Printf("\n[FlowForge] 🚨 PROBING DETECTED: %s\n", sysStatsStr)
 				}
 
 				wd, _ := os.Getwd()
@@ -494,7 +494,7 @@ func runProcess(args []string) {
 
 									fmt.Printf("\n🔍 WATCHDOG [%s]: Loop detected. Escalation Level %d.\n", alertType, watchdogEscalationLevel)
 									fmt.Println("Pattern (Normalized):", firstNormalized)
-									fmt.Printf("[Sentry] Decision: CPU=%.1f Entropy=%.1f Confidence=%.1f\n", cpuScore, entropyScore, confidenceScore)
+									fmt.Printf("[FlowForge] Decision: CPU=%.1f Entropy=%.1f Confidence=%.1f\n", cpuScore, entropyScore, confidenceScore)
 
 									finalTokens := int(observer.TotalTokens())
 									finalCost := tokens.EstimateCost(finalTokens, modelName)
@@ -518,7 +518,7 @@ func runProcess(args []string) {
 										"watchdog",
 										0,
 									)
-									_ = database.LogAuditEvent("agent-sentry", "WATCHDOG_ALERT", reason, "monitor", pid, fullCommand)
+									_ = database.LogAuditEvent("flowforge", "WATCHDOG_ALERT", reason, "monitor", pid, fullCommand)
 
 									// Broadcast
 									wd, _ := os.Getwd()
@@ -536,7 +536,7 @@ func runProcess(args []string) {
 								// NORMAL MODE: Kill the process
 								fmt.Printf("\n🚨 LOOP DETECTED: Semantic Stagnation (CPU: %.2f%% > %.2f%%)\n", cpuUsage, maxCpu)
 								fmt.Println("Pattern (Normalized):", firstNormalized)
-								fmt.Printf("[Sentry] Decision: CPU=%.1f Entropy=%.1f Confidence=%.1f\n", cpuScore, entropyScore, confidenceScore)
+								fmt.Printf("[FlowForge] Decision: CPU=%.1f Entropy=%.1f Confidence=%.1f\n", cpuScore, entropyScore, confidenceScore)
 
 								finalTokens := int(observer.TotalTokens())
 								finalCost := tokens.EstimateCost(finalTokens, modelName)
@@ -560,7 +560,7 @@ func runProcess(args []string) {
 									"terminated",
 									0,
 								)
-								_ = database.LogAuditEvent("agent-sentry", "AUTO_KILL", reason, "monitor", pid, fullCommand)
+								_ = database.LogAuditEvent("flowforge", "AUTO_KILL", reason, "monitor", pid, fullCommand)
 
 								// Broadcast Stop
 								wd, _ := os.Getwd()
@@ -574,15 +574,15 @@ func runProcess(args []string) {
 									pid,
 								)
 
-								sentryTerminated.Store(true)
+								flowforgeTerminated.Store(true)
 								terminateProcessGroupGracefully(pid, 2*time.Second)
 								cancel()
-								fmt.Println("[Sentry] Process terminated after high-confidence runaway detection.")
+								fmt.Println("[FlowForge] Process terminated after high-confidence runaway detection.")
 								return
 							}
 						}
 					}
-					fmt.Printf("[Sentry] WARNING: High CPU (%.2f%%) detected. %s\n", cpuUsage, sysStatsStr)
+					fmt.Printf("[FlowForge] WARNING: High CPU (%.2f%%) detected. %s\n", cpuUsage, sysStatsStr)
 				}
 
 				// --- SAFETY CHOKE POINT ---
@@ -593,13 +593,13 @@ func runProcess(args []string) {
 					if err == nil {
 						memMB := float64(memInfo.RSS) / 1024.0 / 1024.0
 						if memMB > maxMemMB {
-							fmt.Printf("\n[Sentry] 🛑 SAFETY CHOKE: Memory usage (%.2f MB) exceeded limit (%.2f MB). TERMINATING.\n", memMB, maxMemMB)
+							fmt.Printf("\n[FlowForge] 🛑 SAFETY CHOKE: Memory usage (%.2f MB) exceeded limit (%.2f MB). TERMINATING.\n", memMB, maxMemMB)
 							// ... (rest of logic same)
 							finalTokens := int(observer.TotalTokens())
 							finalCost := tokens.EstimateCost(finalTokens, modelName)
 							database.LogIncident(fullCommand, modelName, "SAFETY_LIMIT_EXCEEDED", cpuUsage, fmt.Sprintf("Memory Limit: %.2fMB", memMB), time.Since(startTime).Seconds(), finalTokens, finalCost, agentID, agentVersion)
 
-							sentryTerminated.Store(true)
+							flowforgeTerminated.Store(true)
 							terminateProcessGroupGracefully(pid, 2*time.Second)
 							cancel()
 							return
@@ -615,13 +615,13 @@ func runProcess(args []string) {
 					if elapsedMin > 0.1 { // Warmup 6s
 						rate := float64(currentTokens) / elapsedMin
 						if rate > maxTokensRate {
-							fmt.Printf("\n[Sentry] 🛑 SAFETY CHOKE: Token generation rate (%.0f/min) exceeded limit (%.0f/min). TERMINATING.\n", rate, maxTokensRate)
+							fmt.Printf("\n[FlowForge] 🛑 SAFETY CHOKE: Token generation rate (%.0f/min) exceeded limit (%.0f/min). TERMINATING.\n", rate, maxTokensRate)
 
 							finalTokens := int(currentTokens)
 							finalCost := tokens.EstimateCost(finalTokens, modelName)
 							database.LogIncident(fullCommand, modelName, "SAFETY_LIMIT_EXCEEDED", cpuUsage, fmt.Sprintf("Token Rate: %.0f/min", rate), time.Since(startTime).Seconds(), finalTokens, finalCost, agentID, agentVersion)
 
-							sentryTerminated.Store(true)
+							flowforgeTerminated.Store(true)
 							terminateProcessGroupGracefully(pid, 2*time.Second)
 							cancel()
 							return
@@ -641,7 +641,7 @@ func runProcess(args []string) {
 
 	go func() {
 		sig := <-sigChan
-		fmt.Printf("\n[Sentry] Received signal: %v. Forwarding to subprocess...\n", sig)
+		fmt.Printf("\n[FlowForge] Received signal: %v. Forwarding to subprocess...\n", sig)
 
 		userTerminated.Store(true)
 		finalTokens := int(observer.TotalTokens())
@@ -689,7 +689,7 @@ func runProcess(args []string) {
 				finalCost := tokens.EstimateCost(finalTokens, modelName)
 				_ = database.LogIncident(fullCommand, modelName, "COMMAND_FAILURE", maxObservedCpu, "N/A", time.Since(startTime).Seconds(), finalTokens, finalCost, agentID, agentVersion)
 			}
-			if sentryTerminated.Load() {
+			if flowforgeTerminated.Load() {
 				os.Exit(1)
 			}
 			code := exitErr.ExitCode()
@@ -708,7 +708,7 @@ func runProcess(args []string) {
 		}
 	}
 
-	if sentryTerminated.Load() {
+	if flowforgeTerminated.Load() {
 		os.Exit(1)
 	}
 }

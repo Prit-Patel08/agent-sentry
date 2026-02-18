@@ -14,9 +14,9 @@ var profileName string
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "agent-sentry",
+	Use:   "flowforge",
 	Short: "A CLI supervisor for AI agents",
-	Long: `Agent-Sentry is a CLI tool designed to supervise and monitor subprocesses.
+	Long: `FlowForge is a CLI tool designed to supervise and monitor subprocesses.
 It captures stdout/stderr, monitors CPU usage, and handles graceful shutdowns.`,
 }
 
@@ -29,7 +29,7 @@ func Execute() error {
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./sentry.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./flowforge.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().StringVar(&profileName, "profile", "", "monitoring profile: light, standard, heavy (overrides config file)")
 }
@@ -40,7 +40,7 @@ func initConfig() {
 		viper.SetConfigFile(cfgFile)
 	} else {
 		viper.AddConfigPath(".")
-		viper.SetConfigName("sentry")
+		viper.SetConfigName("flowforge")
 	}
 
 	viper.AutomaticEnv()

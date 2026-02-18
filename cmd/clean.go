@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"agent-sentry/internal/database"
+	"flowforge/internal/database"
 	"fmt"
 	"os"
 
@@ -18,8 +18,8 @@ var cleanCmd = &cobra.Command{
 This prevents the SQLite database from growing indefinitely.
 
 Example:
-  sentry clean --days 30
-  sentry clean --days 0 --force  # Dangerous: Wipes everything
+  flowforge clean --days 30
+  flowforge clean --days 0 --force  # Dangerous: Wipes everything
 `,
 	Run: func(cmd *cobra.Command, args []string) {
 		if cleanDays < 0 {

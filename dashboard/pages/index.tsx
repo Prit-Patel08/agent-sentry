@@ -7,7 +7,7 @@ import Head from 'next/head';
 import { ShieldAlert, Zap, Activity, ServerCrash, Terminal, Cpu, Skull } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-const API_BASE = process.env.NEXT_PUBLIC_SENTRY_API_BASE || 'http://localhost:8080';
+const API_BASE = process.env.NEXT_PUBLIC_FLOWFORGE_API_BASE || 'http://localhost:8080';
 const fetcher = async (url: string) => {
   const res = await fetch(url);
   if (!res.ok) {
@@ -53,7 +53,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const saved = window.sessionStorage.getItem('sentryApiKey');
+    const saved = window.sessionStorage.getItem('flowforgeApiKey');
     if (saved) setApiKey(saved);
   }, []);
 
@@ -106,7 +106,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-obsidian-900 text-gray-100 font-sans selection:bg-accent-500/30">
       <Head>
-        <title>Agent-Sentry Dashboard</title>
+        <title>FlowForge Dashboard</title>
       </Head>
 
       <div className="container mx-auto px-6 py-10 max-w-7xl">
@@ -117,7 +117,7 @@ export default function Dashboard() {
             </div>
             <div>
               <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-2">
-                Agent-Sentry
+                FlowForge
                 <span className="text-sm font-medium px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700">v1.1</span>
               </h1>
               <p className="mt-1 text-gray-400 font-medium">
@@ -135,7 +135,7 @@ export default function Dashboard() {
                   const next = e.target.value;
                   setApiKey(next);
                   if (typeof window !== 'undefined') {
-                    window.sessionStorage.setItem('sentryApiKey', next);
+                    window.sessionStorage.setItem('flowforgeApiKey', next);
                   }
                 }}
                 placeholder="API key (session only)"
@@ -292,7 +292,7 @@ export default function Dashboard() {
                 </div>
               </div>
               <p className="mt-3 text-xs text-gray-500">
-                Confidence is derived from CPU pressure and repetition entropy, then used to explain why Agent-Sentry intervened.
+                Confidence is derived from CPU pressure and repetition entropy, then used to explain why FlowForge intervened.
               </p>
             </div>
           )}
@@ -314,7 +314,7 @@ export default function Dashboard() {
                 <ShieldAlert size={20} />
                 <div>
                   <p className="font-semibold">Connection Lost</p>
-                  <p className="text-xs opacity-75">Ensure the Agent-Sentry CLI is running with `sentry dashboard`.</p>
+                  <p className="text-xs opacity-75">Ensure the FlowForge CLI is running with `flowforge dashboard`.</p>
                 </div>
               </div>
             )}

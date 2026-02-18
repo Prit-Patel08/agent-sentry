@@ -14,24 +14,24 @@ docker run --read-only \
   --cap-drop=ALL \
   --security-opt=no-new-privileges \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m \
-  -e SENTRY_API_KEY="$(openssl rand -hex 32)" \
-  -e SENTRY_MASTER_KEY="$(openssl rand -hex 32)" \
+  -e FLOWFORGE_API_KEY="$(openssl rand -hex 32)" \
+  -e FLOWFORGE_MASTER_KEY="$(openssl rand -hex 32)" \
   -p 8080:8080 \
-  agent-sentry
+  flowforge
 ```
 
 ## Crash Recovery Model
 
 - Supervisor sends termination signals to subprocess process-groups.
 - On shutdown, process groups are first terminated gracefully then force-killed after timeout.
-- Incident records remain in `sentry.db` for post-mortem review.
+- Incident records remain in `flowforge.db` for post-mortem review.
 - Audit events include actor, action, reason, and timestamp for kill/restart operations.
 - Decision traces capture CPU score, entropy score, and confidence score for intervention transparency.
 
 ## Demo Mode
 
 ```bash
-./sentry demo
+./flowforge demo
 ```
 
 Expected summary:
@@ -51,4 +51,13 @@ Run race detector:
 
 ```bash
 go test ./... -race -v
+```
+
+## Week 1 Reliability Pack
+
+```bash
+./scripts/week1_pilot.sh
+./scripts/tune_detection.sh
+./scripts/recovery_drill.sh
+./scripts/release_checkpoint.sh
 ```

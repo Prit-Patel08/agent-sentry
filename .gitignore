@@ -1,23 +1,25 @@
 # Binaries
-sentry
+flowforge
 *.exe
 *.dll
 
 # Database and Keys
-sentry.db
-sentry.key
+flowforge.db
+flowforge.key
 *.sqlite
 *.db
 
 # Live State
-.sentry_live
-.sentry.env
+.flowforge_live
+.flowforge.env
 
 # Logs and Temp
 *.log
 incident_*.md
-sentry_report_*.md
+flowforge_report_*.md
 logs/
+pilot_artifacts/
+ci_artifacts/
 
 # Go
 vendor/

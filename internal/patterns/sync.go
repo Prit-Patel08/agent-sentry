@@ -12,13 +12,11 @@ import (
 
 const (
 	BlacklistFile = "pattern_blacklist.json"
-	MockCloudURL  = "https://api.agent-sentry.dev/patterns" // Mock endpoint
 )
 
 var mu sync.Mutex
 
-// SyncPatterns "uploads" a detected pattern to the global endpoint (mocked)
-// and appends it to the local blacklist.
+// SyncPatterns appends a detected pattern to the local blacklist.
 func SyncPatterns(pattern string) error {
 	mu.Lock()
 	defer mu.Unlock()
@@ -43,27 +41,22 @@ func SyncPatterns(pattern string) error {
 		return fmt.Errorf("failed to save blacklist: %v", err)
 	}
 
-	// Mock cloud sync
-	fmt.Printf("[Sentry] ☁️  Pattern synced to %s (mock)\n", MockCloudURL)
-	fmt.Printf("[Sentry] 📋 Local blacklist updated (%d patterns)\n", len(blacklist))
+	fmt.Printf("[FlowForge] 📋 Pattern registry updated (%d patterns)\n", len(blacklist))
 
 	return nil
 }
 
-// PullPatterns "downloads" patterns from the global endpoint (mocked)
-// and returns the local blacklist.
+// PullPatterns loads patterns from the local blacklist.
 func PullPatterns() []string {
 	mu.Lock()
 	defer mu.Unlock()
-
-	fmt.Printf("[Sentry] ☁️  Pulling patterns from %s (mock)\n", MockCloudURL)
 
 	blacklist, err := loadBlacklist()
 	if err != nil {
 		return []string{}
 	}
 
-	fmt.Printf("[Sentry] 📋 Loaded %d known bad patterns\n", len(blacklist))
+	fmt.Printf("[FlowForge] 📋 Loaded %d known bad patterns\n", len(blacklist))
 	return blacklist
 }
 

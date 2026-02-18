@@ -1,13 +1,13 @@
-# Agent-Sentry Threat Model
+# FlowForge Threat Model
 
 ## Scope
 
-Agent-Sentry supervises local subprocesses, monitors behavior, and exposes a local HTTP API for dashboards/control.
+FlowForge supervises local subprocesses, monitors behavior, and exposes a local HTTP API for dashboards/control.
 
 ## Assets
 
-- API credentials (`SENTRY_API_KEY`, `SENTRY_MASTER_KEY`)
-- Incident database (`sentry.db`)
+- API credentials (`FLOWFORGE_API_KEY`, `FLOWFORGE_MASTER_KEY`)
+- Incident database (`flowforge.db`)
 - Runtime process metadata and output stream
 - Process control actions (kill/restart)
 
@@ -22,7 +22,7 @@ Agent-Sentry supervises local subprocesses, monitors behavior, and exposes a loc
 
 - API endpoints (`/process/*`, `/incidents`, `/stream`)
 - Subprocess stdout/stderr data flow
-- Config file values (`sentry.yaml`)
+- Config file values (`flowforge.yaml`)
 - Container/runtime deployment options
 
 ## Mitigations Implemented

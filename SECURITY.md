@@ -2,11 +2,11 @@
 
 ## Supported Versions
 
-Only the latest release of `agent-sentry` is supported for security updates.
+Only the latest release of `flowforge` is supported for security updates.
 
 ## Reporting a Vulnerability
 
-We take security seriously. If you find a vulnerability, please do NOT open a public issue. Instead, send a detailed report to `security@agent-sentry.io`.
+We take security seriously. If you find a vulnerability, please do NOT open a public issue. Instead, send a detailed report to `security@flowforge.io`.
 
 ### Disclosure Policy
 

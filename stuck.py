@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simple self-contained loop demo for Agent-Sentry."""
+"""Simple self-contained loop demo for FlowForge."""
 
 import time
 

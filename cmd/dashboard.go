@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"agent-sentry/internal/api"
+	"flowforge/internal/api"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -10,7 +10,7 @@ import (
 // dashboardCmd represents the dashboard command
 var dashboardCmd = &cobra.Command{
 	Use:   "dashboard",
-	Short: "Start the Agent-Sentry dashboard API",
+	Short: "Start the FlowForge dashboard API",
 	Long: `Starts the HTTP API server on port 8080.
 This allows the Next.js dashboard to query incident history.
 `,

@@ -1,8 +1,8 @@
 package test
 
 import (
-	"agent-sentry/cmd"
-	"agent-sentry/internal/redact"
+	"flowforge/cmd"
+	"flowforge/internal/redact"
 	"testing"
 )
 
@@ -24,7 +24,7 @@ func FuzzNormalizeLog(f *testing.F) {
 func FuzzRedactLine(f *testing.F) {
 	seeds := []string{
 		"Authorization: Bearer abc.def.ghi",
-		"SENTRY_API_KEY=abcd1234",
+		"FLOWFORGE_API_KEY=abcd1234",
 		"AKIAIOSFODNN7EXAMPLE",
 	}
 	for _, s := range seeds {

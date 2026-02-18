@@ -1,8 +1,8 @@
 package test
 
 import (
-	"agent-sentry/cmd"
-	"agent-sentry/internal/redact"
+	"flowforge/cmd"
+	"flowforge/internal/redact"
 	"testing"
 )
 
@@ -15,7 +15,7 @@ func BenchmarkNormalizeLog(b *testing.B) {
 }
 
 func BenchmarkRedactLine(b *testing.B) {
-	line := "Authorization: Bearer secret-token-value SENTRY_API_KEY=abcd1234ef567890abcdef1234567890"
+	line := "Authorization: Bearer secret-token-value FLOWFORGE_API_KEY=abcd1234ef567890abcdef1234567890"
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_ = redact.Line(line)

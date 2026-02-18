@@ -15,20 +15,20 @@ var masterKey []byte
 // Init loads the master key from environment variables.
 func Init() error {
 	// 1. Check Env Var
-	envKey := os.Getenv("SENTRY_MASTER_KEY")
+	envKey := os.Getenv("FLOWFORGE_MASTER_KEY")
 	if envKey != "" {
 		key, err := hex.DecodeString(envKey)
 		if err != nil {
-			return fmt.Errorf("invalid SENTRY_MASTER_KEY hex: %v", err)
+			return fmt.Errorf("invalid FLOWFORGE_MASTER_KEY hex: %v", err)
 		}
 		if len(key) != 32 {
-			return fmt.Errorf("SENTRY_MASTER_KEY must be 32 bytes (64 hex chars)")
+			return fmt.Errorf("FLOWFORGE_MASTER_KEY must be 32 bytes (64 hex chars)")
 		}
 		masterKey = key
 		return nil
 	}
 
-	return fmt.Errorf("SENTRY_MASTER_KEY environment variable is NOT set; security policy requires an explicit master key for encryption")
+	return fmt.Errorf("FLOWFORGE_MASTER_KEY environment variable is NOT set; security policy requires an explicit master key for encryption")
 }
 
 // Encrypt encrypts plain text using AES-GCM.

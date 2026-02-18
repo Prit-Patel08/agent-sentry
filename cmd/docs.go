@@ -11,7 +11,7 @@ import (
 var docsCmd = &cobra.Command{
 	Use:   "docs",
 	Short: "Generate Markdown documentation for the CLI",
-	Long:  `Generates standard Markdown documentation for all agent-sentry commands in the ./docs directory.`,
+	Long:  `Generates standard Markdown documentation for all flowforge commands in the ./docs directory.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		outputDir := "./docs"
 		if err := os.MkdirAll(outputDir, 0755); err != nil {

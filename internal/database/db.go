@@ -1,8 +1,8 @@
 package database
 
 import (
-	"agent-sentry/internal/encryption"
 	"database/sql"
+	"flowforge/internal/encryption"
 	"fmt"
 	"os"
 	"sort"
@@ -83,9 +83,9 @@ type UnifiedEvent struct {
 }
 
 func InitDB() error {
-	dbPath := os.Getenv("SENTRY_DB_PATH")
+	dbPath := os.Getenv("FLOWFORGE_DB_PATH")
 	if dbPath == "" {
-		dbPath = "sentry.db"
+		dbPath = "flowforge.db"
 	}
 	var err error
 

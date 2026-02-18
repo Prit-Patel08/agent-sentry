@@ -1,7 +1,7 @@
 package test
 
 import (
-	"agent-sentry/internal/sysmon"
+	"flowforge/internal/sysmon"
 	"os"
 	"os/exec"
 	"testing"

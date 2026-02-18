@@ -1,4 +1,4 @@
-# Agent-Sentry Product Execution Plan
+# FlowForge Product Execution Plan
 
 Date: 2026-02-18
 Owner: Product + Engineering
@@ -8,7 +8,7 @@ Scope: Local-first process supervision product (no SaaS, no multi-tenant, no bil
 
 ## 1) Executive Summary
 
-Agent-Sentry should be operated as a focused reliability product for runaway process protection.
+FlowForge should be operated as a focused reliability product for runaway process protection.
 The fastest path to a high-trust product is:
 
 1. Keep the product local-first and narrow.
@@ -35,7 +35,7 @@ This plan turns the repo into an execution workflow with phase gates, quality ba
 
 ## 3) Product Positioning (Current)
 
-Agent-Sentry is a local process guardrail that detects runaway behavior, intervenes safely, and explains every decision with auditable evidence.
+FlowForge is a local process guardrail that detects runaway behavior, intervenes safely, and explains every decision with auditable evidence.
 
 Primary user now:
 - Dev teams running long-lived AI agent jobs and automation scripts on laptops or CI runners.
@@ -91,14 +91,14 @@ flowchart LR
   A["Clone Repo"] --> B["Run install.sh"]
   B --> C["Generate secure local keys"]
   C --> D["Build backend + dashboard"]
-  D --> E["Run sentry demo"]
+  D --> E["Run flowforge demo"]
   E --> F["Open dashboard"]
   F --> G["See detection + recovery timeline"]
-  G --> H["Run first real command with sentry run"]
+  G --> H["Run first real command with flowforge run"]
 ```
 
 ASCII fallback (plain text):
-[Clone Repo] -> [Run install.sh] -> [Generate secure local keys] -> [Build backend + dashboard] -> [Run sentry demo] -> [Open dashboard] -> [See detection + recovery timeline] -> [Run first real command with sentry run]
+[Clone Repo] -> [Run install.sh] -> [Generate secure local keys] -> [Build backend + dashboard] -> [Run flowforge demo] -> [Open dashboard] -> [See detection + recovery timeline] -> [Run first real command with flowforge run]
 
 ### B) Runtime Detection Workflow
 
@@ -682,7 +682,7 @@ then reduce scope further and revalidate core problem before adding any new feat
 
 ## 21) One-Paragraph Positioning Statement
 
-Agent-Sentry is a local reliability guardrail for long-running scripts and AI agent workflows: it supervises execution, detects runaway behavior, intervenes safely, and records clear, auditable reasons for every action so developers can trust automation without losing control.
+FlowForge is a local reliability guardrail for long-running scripts and AI agent workflows: it supervises execution, detects runaway behavior, intervenes safely, and records clear, auditable reasons for every action so developers can trust automation without losing control.
 
 ---
 
@@ -702,3 +702,187 @@ Use this template for every feature request:
 10. Rollback Plan:
 11. Release Validation:
 12. Post-Release Review Date:
+
+---
+
+## 23) Ideal Domain Expansion Map (Cloudflare-Style Breadth, Sequenced)
+
+Purpose:
+- keep a large long-term vision without breaking short-term focus.
+- expand by domains only after hard readiness gates are met.
+
+Domain sequencing rule:
+1. Core Runtime Reliability (must be excellent first)
+2. Security Controls
+3. Policy and Governance
+4. Observability and Forensics
+5. Deployment Surface
+6. Ecosystem and Integrations
+
+Readiness gate before opening any new domain:
+- onboarding <= 5 minutes
+- false-positive rate within target
+- crash-free session target met
+- release checklist and rollback drills passing
+- docs/runbooks current
+
+### Domain A) Core Runtime Reliability
+
+Scope:
+- stronger runaway classification profiles
+- bounded restart policies
+- deterministic shutdown and child cleanup
+- command resource guardrails (cpu/mem/token-rate)
+
+Example features:
+- per-command runtime profile presets
+- restart backoff and max restart window
+- stuck-process timeout policy
+- run replay summary from persisted events
+
+Unlock criteria:
+- baseline domain; always active until mature.
+
+### Domain B) Security Controls
+
+Scope:
+- local auth hardening
+- secret hygiene
+- execution safety boundaries
+
+Example features:
+- signed local action approvals (optional)
+- stricter endpoint permission tiers
+- immutable audit export bundle
+- key rotation helper workflow
+
+Unlock criteria:
+- Domain A stable with low operational incidents.
+
+### Domain C) Policy and Governance
+
+Scope:
+- reusable policy packs for teams
+- policy validation/linting
+- policy simulation before enforcement
+
+Example features:
+- policy dry-run mode with impact report
+- profile registry for team-standard policies
+- confidence threshold policy packs by workload type
+- policy conflict checker
+
+Unlock criteria:
+- Domain A and B stable, with clear user demand for shared policy.
+
+### Domain D) Observability and Forensics
+
+Scope:
+- high-clarity operational timeline
+- deeper forensic context for interventions
+- robust benchmark and incident analytics
+
+Example features:
+- event correlation view (incident + decision + action chain)
+- benchmark trend tracking across commits
+- forensic export command (sanitized)
+- anomaly score drift report
+
+Unlock criteria:
+- Domain A baseline metrics stable for two release cycles.
+
+### Domain E) Deployment Surface
+
+Scope:
+- repeatable deployment across environments
+- hardened packaging and upgrade safety
+
+Example features:
+- hermetic build profile
+- offline install bundle
+- migration preflight checker
+- host capability validator
+
+Unlock criteria:
+- runbooks mature and rollback drills proven.
+
+### Domain F) Ecosystem and Integrations
+
+Scope:
+- connect to existing dev workflows without bloating core
+
+Example features:
+- CI adapters (consume events and enforce policy outcome gates)
+- chat notifications for intervention summaries
+- issue tracker incident export
+- SIEM-friendly JSON event stream exporter
+
+Unlock criteria:
+- Domain A-D stable and clear integration pull from users.
+
+---
+
+## 24) Feature Universe Backlog (Ideal, Not Immediate)
+
+These are intentionally broad and should remain parked until domain gates open.
+
+Reliability universe:
+- workload fingerprinting
+- adaptive threshold tuning from local history
+- bounded auto-remediation playbooks
+- run safety scorecard
+
+Security universe:
+- tamper-evident local audit chain
+- host integrity prechecks before run
+- secret source scanning of process output channels
+- policy-based kill approval modes
+
+Policy universe:
+- policy templates by language/runtime
+- policy provenance metadata
+- policy test harness fixtures
+- policy rollout canary mode
+
+Observability universe:
+- incident diff between two runs
+- confidence decomposition timeline
+- postmortem report generator from event graph
+- benchmark comparison CLI
+
+Operations universe:
+- upgrade planner with migration checks
+- environment compatibility matrix command
+- release health snapshot command
+- disaster recovery checklist automation
+
+Integrations universe:
+- git hook guardrail mode
+- pipeline status gate mode
+- message bus exporter (local forwarding)
+- standardized event schema adapters
+
+---
+
+## 25) Anti-Overbuild Rules For Domain Expansion
+
+1. No domain expansion if P0 metrics are below target.
+2. No new domain features without a named design-partner request pattern.
+3. No architecture abstraction added unless used by at least two active features.
+4. No integration feature before core event schema is stable for two cycles.
+5. Every new domain feature must include removal criteria if adoption is weak.
+
+---
+
+## 26) Domain Planning Template
+
+Use this before opening a domain:
+
+1. Domain Name:
+2. Why now:
+3. User pull evidence:
+4. Prerequisite gates status:
+5. First 3 features (max):
+6. Success metrics:
+7. Failure signals:
+8. Rollback/retire plan:

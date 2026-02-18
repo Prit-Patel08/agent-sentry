@@ -1,13 +1,13 @@
 package api
 
 import (
-	"agent-sentry/internal/database"
-	"agent-sentry/internal/metrics"
-	"agent-sentry/internal/state"
 	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"flowforge/internal/database"
+	"flowforge/internal/metrics"
+	"flowforge/internal/state"
 	"fmt"
 	"io"
 	"log"
@@ -49,7 +49,7 @@ func corsMiddleware(w http.ResponseWriter, r *http.Request) {
 		allowed[o] = struct{}{}
 	}
 
-	if envOrigin := strings.TrimSpace(os.Getenv("SENTRY_ALLOWED_ORIGIN")); envOrigin != "" && isLocalOrigin(envOrigin) {
+	if envOrigin := strings.TrimSpace(os.Getenv("FLOWFORGE_ALLOWED_ORIGIN")); envOrigin != "" && isLocalOrigin(envOrigin) {
 		allowed[envOrigin] = struct{}{}
 	}
 
@@ -94,15 +94,15 @@ func withSecurity(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requireAuth checks the SENTRY_API_KEY env var.
+// requireAuth checks the FLOWFORGE_API_KEY env var.
 // If no key is set, mutating endpoints are blocked.
 func requireAuth(w http.ResponseWriter, r *http.Request) bool {
 	ip := clientIP(r.RemoteAddr)
-	apiKey := os.Getenv("SENTRY_API_KEY")
+	apiKey := os.Getenv("FLOWFORGE_API_KEY")
 
 	if apiKey == "" {
 		if r.Method == "POST" {
-			http.Error(w, `{"error":"Security Alert: You must set SENTRY_API_KEY environment variable to perform mutations."}`, http.StatusForbidden)
+			http.Error(w, `{"error":"Security Alert: You must set FLOWFORGE_API_KEY environment variable to perform mutations."}`, http.StatusForbidden)
 			return false
 		}
 		return true
@@ -149,11 +149,11 @@ func StartServer(port string) {
 
 // Start launches the API server and returns a stop function for graceful shutdown.
 func Start(port string) func() {
-	apiKey := os.Getenv("SENTRY_API_KEY")
+	apiKey := os.Getenv("FLOWFORGE_API_KEY")
 	if apiKey != "" {
 		fmt.Println("🔒 API Key authentication ENABLED for /process/* endpoints")
 	} else {
-		fmt.Println("⚠️  No SENTRY_API_KEY set - mutating endpoints are blocked")
+		fmt.Println("⚠️  No FLOWFORGE_API_KEY set - mutating endpoints are blocked")
 	}
 
 	mux := http.NewServeMux()
@@ -194,7 +194,7 @@ func Start(port string) func() {
 
 func resolveBindAddr(port string) string {
 	// Keep local-only binding unless explicitly asked for localhost alias.
-	host := os.Getenv("SENTRY_BIND_HOST")
+	host := os.Getenv("FLOWFORGE_BIND_HOST")
 	if host == "" {
 		host = "127.0.0.1"
 	}

@@ -14,10 +14,10 @@ RUN go mod download
 COPY . .
 
 # Build the main binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o sentry -ldflags="-s -w" .
+RUN CGO_ENABLED=0 GOOS=linux go build -o flowforge -ldflags="-s -w" .
 
 # Build a small healthcheck probe
-RUN CGO_ENABLED=0 GOOS=linux go build -o probe agent-sentry/cmd/healthcheck
+RUN CGO_ENABLED=0 GOOS=linux go build -o probe flowforge/cmd/healthcheck
 
 # Final stage
 FROM gcr.io/distroless/static-debian12
@@ -25,7 +25,7 @@ FROM gcr.io/distroless/static-debian12
 WORKDIR /tmp
 
 # Copy binaries
-COPY --from=builder /app/sentry /sentry
+COPY --from=builder /app/flowforge /flowforge
 COPY --from=builder /app/probe /probe
 
 # Use non-root user
@@ -40,4 +40,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 # Runtime hardening knobs (enforce with docker run flags in docs).
 ENV GODEBUG=madvdontneed=1
-ENTRYPOINT ["/sentry", "run"]
+ENTRYPOINT ["/flowforge", "run"]

@@ -1,7 +1,7 @@
 package test
 
 import (
-	"agent-sentry/cmd"
+	"flowforge/cmd"
 	"os"
 	"path/filepath"
 	"runtime"

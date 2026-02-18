@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"agent-sentry/internal/api"
+	"flowforge/internal/api"
 )
 
 // TestCORSHeaders ensures that the /incidents endpoint returns proper CORS headers.
@@ -60,8 +60,8 @@ func TestIncidentsEndpointHealth(t *testing.T) {
 // TestKillEndpointRequiresAuth verifies that /process/kill rejects unauthorized requests.
 func TestKillEndpointRequiresAuth(t *testing.T) {
 	// Set the API key
-	os.Setenv("SENTRY_API_KEY", "test-secret-key-12345")
-	defer os.Unsetenv("SENTRY_API_KEY")
+	os.Setenv("FLOWFORGE_API_KEY", "test-secret-key-12345")
+	defer os.Unsetenv("FLOWFORGE_API_KEY")
 
 	req := httptest.NewRequest("POST", "/process/kill", nil)
 	w := httptest.NewRecorder()
@@ -77,8 +77,8 @@ func TestKillEndpointRequiresAuth(t *testing.T) {
 
 // TestKillEndpointAuthPasses verifies that /process/kill accepts authorized requests.
 func TestKillEndpointAuthPasses(t *testing.T) {
-	os.Setenv("SENTRY_API_KEY", "test-secret-key-12345")
-	defer os.Unsetenv("SENTRY_API_KEY")
+	os.Setenv("FLOWFORGE_API_KEY", "test-secret-key-12345")
+	defer os.Unsetenv("FLOWFORGE_API_KEY")
 
 	req := httptest.NewRequest("POST", "/process/kill", nil)
 	req.Header.Set("Authorization", "Bearer test-secret-key-12345")
@@ -94,9 +94,9 @@ func TestKillEndpointAuthPasses(t *testing.T) {
 	}
 }
 
-// TestKillEndpointNoKeySetIsBlocked verifies that without SENTRY_API_KEY, mutating endpoints are blocked.
+// TestKillEndpointNoKeySetIsBlocked verifies that without FLOWFORGE_API_KEY, mutating endpoints are blocked.
 func TestKillEndpointNoKeySetIsBlocked(t *testing.T) {
-	os.Unsetenv("SENTRY_API_KEY")
+	os.Unsetenv("FLOWFORGE_API_KEY")
 
 	req := httptest.NewRequest("POST", "/process/kill", nil)
 	w := httptest.NewRecorder()
@@ -107,7 +107,7 @@ func TestKillEndpointNoKeySetIsBlocked(t *testing.T) {
 
 	// Should be 403 Forbidden when no key is set (Mutations blocked for security)
 	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("Expected 403 Forbidden when SENTRY_API_KEY is not set, but got %d", resp.StatusCode)
+		t.Errorf("Expected 403 Forbidden when FLOWFORGE_API_KEY is not set, but got %d", resp.StatusCode)
 	}
 }
 
@@ -136,8 +136,8 @@ func TestTimelineEndpoint(t *testing.T) {
 }
 
 func TestKillEndpointBruteForceBlocked(t *testing.T) {
-	os.Setenv("SENTRY_API_KEY", "test-secret-key-12345")
-	defer os.Unsetenv("SENTRY_API_KEY")
+	os.Setenv("FLOWFORGE_API_KEY", "test-secret-key-12345")
+	defer os.Unsetenv("FLOWFORGE_API_KEY")
 
 	for i := 0; i < 11; i++ {
 		req := httptest.NewRequest("POST", "/process/kill", nil)

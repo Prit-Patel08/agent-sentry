@@ -1,4 +1,4 @@
-module agent-sentry
+module flowforge
 
 go 1.25
 

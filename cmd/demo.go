@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"agent-sentry/internal/database"
+	"flowforge/internal/database"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,7 +18,7 @@ var demoCmd = &cobra.Command{
 	Use:   "demo",
 	Short: "Run a 60-second product demo with automatic runaway recovery",
 	Long: `Runs a deterministic demonstration using the same supervision pipeline as 'run':
-1) launches a runaway process under sentry run,
+1) launches a runaway process under flowforge run,
 2) detects runaway behavior,
 3) terminates it automatically,
 4) restarts a healthy worker,
@@ -34,7 +34,7 @@ func init() {
 }
 
 func runDemo() error {
-	fmt.Println("[Demo] Starting runaway worker through 'sentry run'...")
+	fmt.Println("[Demo] Starting runaway worker through 'flowforge run'...")
 
 	exePath, err := os.Executable()
 	if err != nil {
@@ -79,7 +79,7 @@ func runDemo() error {
 	fmt.Println("[Demo] Restarting a healthy worker...")
 	recovered, healthyPID := restartHealthyWorker()
 	if recovered {
-		_ = database.LogAuditEvent("agent-sentry-demo", "AUTO_RESTART", "restarted with healthy worker profile", "demo", healthyPID, "python3 demo/recovered.py")
+		_ = database.LogAuditEvent("flowforge-demo", "AUTO_RESTART", "restarted with healthy worker profile", "demo", healthyPID, "python3 demo/recovered.py")
 	}
 
 	fmt.Printf("\nRunaway detected in %.1f seconds\n", detectedAt)

@@ -4,7 +4,7 @@ set -euo pipefail
 
 API_PORT="${API_PORT:-8080}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-3001}"
-ENV_FILE=".sentry.env"
+ENV_FILE=".flowforge.env"
 OPEN_BROWSER=0
 RUN_DEMO="${RUN_DEMO:-1}"
 
@@ -15,7 +15,7 @@ for arg in "$@"; do
   esac
 done
 
-echo "== Agent-Sentry production setup =="
+echo "== FlowForge production setup =="
 
 command -v go >/dev/null 2>&1 || { echo "Go is required"; exit 1; }
 command -v npm >/dev/null 2>&1 || { echo "npm is required"; exit 1; }
@@ -28,19 +28,35 @@ random_hex_32() {
   fi
 }
 
+upsert_env() {
+  local key="$1"
+  local value="$2"
+  local file="$3"
+
+  if grep -q "^${key}=" "$file"; then
+    awk -v k="$key" -v v="$value" -F= 'BEGIN { OFS="=" } $1 == k { $0 = k "=" v } { print }' "$file" > "${file}.tmp"
+    mv "${file}.tmp" "$file"
+  else
+    echo "${key}=${value}" >> "$file"
+  fi
+}
+
+legacy_value() {
+  local key_regex="$1"
+  local file="$2"
+  awk -F= -v key_regex="$key_regex" '
+    $1 ~ key_regex && $1 !~ /^FLOWFORGE_/ && $1 !~ /^NEXT_PUBLIC_FLOWFORGE_/ {
+      print substr($0, index($0, "=") + 1)
+      exit
+    }
+  ' "$file"
+}
+
+GENERATED_API_KEY=""
+
 if [[ ! -f "$ENV_FILE" ]]; then
-  API_KEY="$(random_hex_32)"
-  MASTER_KEY="$(random_hex_32)"
-  cat > "$ENV_FILE" <<EOF
-SENTRY_API_KEY=$API_KEY
-SENTRY_MASTER_KEY=$MASTER_KEY
-SENTRY_ALLOWED_ORIGIN=http://localhost:${DASHBOARD_PORT}
-SENTRY_BIND_HOST=127.0.0.1
-NEXT_PUBLIC_SENTRY_API_BASE=http://localhost:${API_PORT}
-EOF
-  chmod 600 "$ENV_FILE"
-  echo "Generated secure runtime secrets."
-  echo "API key (shown once): $API_KEY"
+  touch "$ENV_FILE"
+  echo "Created $ENV_FILE"
 else
   echo "Using existing $ENV_FILE"
 fi
@@ -49,9 +65,61 @@ set -a
 source "$ENV_FILE"
 set +a
 
+if [[ -z "${FLOWFORGE_API_KEY:-}" ]]; then
+  FLOWFORGE_API_KEY="$(legacy_value '^[A-Z0-9_]+_API_KEY$' "$ENV_FILE" || true)"
+  if [[ -z "$FLOWFORGE_API_KEY" ]]; then
+    FLOWFORGE_API_KEY="$(random_hex_32)"
+    GENERATED_API_KEY="$FLOWFORGE_API_KEY"
+  fi
+  upsert_env "FLOWFORGE_API_KEY" "$FLOWFORGE_API_KEY" "$ENV_FILE"
+fi
+
+if [[ -z "${FLOWFORGE_MASTER_KEY:-}" ]]; then
+  FLOWFORGE_MASTER_KEY="$(legacy_value '^[A-Z0-9_]+_MASTER_KEY$' "$ENV_FILE" || true)"
+  if [[ -z "$FLOWFORGE_MASTER_KEY" ]]; then
+    FLOWFORGE_MASTER_KEY="$(random_hex_32)"
+  fi
+  upsert_env "FLOWFORGE_MASTER_KEY" "$FLOWFORGE_MASTER_KEY" "$ENV_FILE"
+fi
+
+if [[ -z "${FLOWFORGE_ALLOWED_ORIGIN:-}" ]]; then
+  FLOWFORGE_ALLOWED_ORIGIN="$(legacy_value '^[A-Z0-9_]+_ALLOWED_ORIGIN$' "$ENV_FILE" || true)"
+  if [[ -z "$FLOWFORGE_ALLOWED_ORIGIN" ]]; then
+    FLOWFORGE_ALLOWED_ORIGIN="http://localhost:${DASHBOARD_PORT}"
+  fi
+  upsert_env "FLOWFORGE_ALLOWED_ORIGIN" "$FLOWFORGE_ALLOWED_ORIGIN" "$ENV_FILE"
+fi
+
+if [[ -z "${FLOWFORGE_BIND_HOST:-}" ]]; then
+  FLOWFORGE_BIND_HOST="$(legacy_value '^[A-Z0-9_]+_BIND_HOST$' "$ENV_FILE" || true)"
+  if [[ -z "$FLOWFORGE_BIND_HOST" ]]; then
+    FLOWFORGE_BIND_HOST="127.0.0.1"
+  fi
+  upsert_env "FLOWFORGE_BIND_HOST" "$FLOWFORGE_BIND_HOST" "$ENV_FILE"
+fi
+
+if [[ -z "${NEXT_PUBLIC_FLOWFORGE_API_BASE:-}" ]]; then
+  NEXT_PUBLIC_FLOWFORGE_API_BASE="$(legacy_value '^NEXT_PUBLIC_[A-Z0-9_]+_API_BASE$' "$ENV_FILE" || true)"
+  if [[ -z "$NEXT_PUBLIC_FLOWFORGE_API_BASE" ]]; then
+    NEXT_PUBLIC_FLOWFORGE_API_BASE="http://localhost:${API_PORT}"
+  fi
+  upsert_env "NEXT_PUBLIC_FLOWFORGE_API_BASE" "$NEXT_PUBLIC_FLOWFORGE_API_BASE" "$ENV_FILE"
+fi
+
+chmod 600 "$ENV_FILE"
+
+if [[ -n "$GENERATED_API_KEY" ]]; then
+  echo "Generated secure runtime API key."
+  echo "API key (shown once): $GENERATED_API_KEY"
+fi
+
+set -a
+source "$ENV_FILE"
+set +a
+
 echo "Building backend..."
 go mod download
-go build -o sentry .
+go build -o flowforge .
 
 echo "Building dashboard (production)..."
 pushd dashboard >/dev/null
@@ -65,23 +133,23 @@ fi
 
 if [[ "$RUN_DEMO" == "1" ]]; then
   echo "Running 60-second value demo..."
-  ./sentry demo || true
+  ./flowforge demo || true
 fi
 
 cleanup() {
-  pkill -f "./sentry dashboard" 2>/dev/null || true
+  pkill -f "./flowforge dashboard" 2>/dev/null || true
   pkill -f "next start -p ${DASHBOARD_PORT}" 2>/dev/null || true
 }
 trap cleanup EXIT
 
 echo "Starting API..."
-./sentry dashboard &
+./flowforge dashboard &
 sleep 1
 
 echo "Starting dashboard server..."
 (
   cd dashboard
-  NEXT_PUBLIC_SENTRY_API_BASE="http://localhost:${API_PORT}" npm run start -- -p "${DASHBOARD_PORT}"
+  NEXT_PUBLIC_FLOWFORGE_API_BASE="http://localhost:${API_PORT}" npm run start -- -p "${DASHBOARD_PORT}"
 ) &
 
 echo "API:       http://localhost:${API_PORT}/healthz"

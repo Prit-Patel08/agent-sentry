@@ -1,18 +1,19 @@
-# Agent-Sentry
+# FlowForge
 
-Agent-Sentry is a local guardrail for long-running scripts and AI agent jobs.
+FlowForge is a local guardrail for long-running scripts and AI agent jobs.
 It supervises a command, detects runaway behavior, intervenes safely, and records why.
 
 ## 60-Second Quickstart
 
 ```bash
-cd /Users/pritpatel/Desktop/agent-sentry
+cd /Users/pritpatel/Desktop/flowforge
 chmod +x scripts/install.sh
 ./scripts/install.sh --open-browser
 ```
 
 What you should see:
-1. secure API keys generated once in `.sentry.env`
+1. secure API keys generated once in `.flowforge.env`
+   - existing legacy keys are auto-migrated to `FLOWFORGE_*`
 2. demo run triggers detection/intervention
 3. summary printed:
    - `Runaway detected in X seconds`
@@ -25,19 +26,19 @@ What you should see:
 Supervise your own command:
 
 ```bash
-./sentry run -- python3 your_script.py
+./flowforge run -- python3 your_script.py
 ```
 
 Run demo again:
 
 ```bash
-./sentry demo
+./flowforge demo
 ```
 
 Start API only:
 
 ```bash
-./sentry dashboard
+./flowforge dashboard
 ```
 
 ## How It Works (Mental Model)
@@ -71,7 +72,7 @@ process -> monitor -> decision -> action -> DB events -> API -> dashboard
 
 ## Security Defaults
 
-- mutating endpoints require `SENTRY_API_KEY`
+- mutating endpoints require `FLOWFORGE_API_KEY`
 - constant-time token comparison
 - localhost-only bind (`127.0.0.1` by default)
 - strict local CORS allowlist
@@ -104,6 +105,12 @@ Fixtures:
 
 ## Build and Validation
 
+One-command local gate:
+
+```bash
+./scripts/verify_local.sh
+```
+
 Backend:
 
 ```bash
@@ -125,16 +132,25 @@ npm run build
 
 1. Dashboard cannot connect
 - ensure API is running on `http://localhost:8080`
-- ensure `NEXT_PUBLIC_SENTRY_API_BASE` is correct
+- ensure `NEXT_PUBLIC_FLOWFORGE_API_BASE` is correct
 
 2. Kill/Restart returns unauthorized
-- set `SENTRY_API_KEY` and provide `Authorization: Bearer <key>`
+- set `FLOWFORGE_API_KEY` and provide `Authorization: Bearer <key>`
 
 3. Demo doesn’t trigger quickly
-- run `./sentry demo --max-cpu 30`
+- run `./flowforge demo --max-cpu 30`
+
+## Week 1 Ops
+
+- run pilot pack: `./scripts/week1_pilot.sh`
+- run threshold tuning: `./scripts/tune_detection.sh`
+- run recovery drill: `./scripts/recovery_drill.sh`
+- run release checkpoint: `./scripts/release_checkpoint.sh`
 
 ## Docs
 
 - operations: `docs/OPERATIONS.md`
 - threat model: `docs/THREAT_MODEL.md`
+- runbook: `docs/RUNBOOK.md`
+- week 1 checklist: `docs/WEEK1_PILOT.md`
 - security policy: `SECURITY.md`
