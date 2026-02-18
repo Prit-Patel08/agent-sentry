@@ -47,7 +47,7 @@ Date: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 ## Ready
 
-Week 1 release checkpoint is complete.
+Release checkpoint is complete.
 EOF
 
 echo "Release checkpoint complete: $REPORT_FILE"
