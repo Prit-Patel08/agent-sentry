@@ -8,7 +8,22 @@ import { ShieldAlert, Zap, Activity, ServerCrash, Terminal, Cpu, Skull } from 'l
 import { useEffect, useState } from 'react';
 
 const API_BASE = process.env.NEXT_PUBLIC_SENTRY_API_BASE || 'http://localhost:8080';
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+const fetcher = async (url: string) => {
+  const res = await fetch(url);
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const payload = await res.json();
+      if (payload?.error) {
+        message = String(payload.error);
+      }
+    } catch {
+      // keep default message
+    }
+    throw new Error(message);
+  }
+  return res.json();
+};
 
 interface LiveStats {
   cpu: number;
@@ -34,6 +49,7 @@ export default function Dashboard() {
   const [apiKey, setApiKey] = useState('');
   const [killConfirm, setKillConfirm] = useState(false);
   const [killStatus, setKillStatus] = useState<string | null>(null);
+  const [killStatusIsError, setKillStatusIsError] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -178,7 +194,7 @@ export default function Dashboard() {
               {liveStats.status === 'RUNNING' && liveStats.pid > 0 && (
                 <div className="mt-4 pt-4 border-t border-gray-700/50">
                   {killStatus && (
-                    <div className="mb-3 text-xs font-mono text-green-400 bg-green-900/20 px-3 py-2 rounded-lg border border-green-500/20">
+                    <div className={`mb-3 text-xs font-mono px-3 py-2 rounded-lg border ${killStatusIsError ? 'text-red-400 bg-red-900/20 border-red-500/20' : 'text-green-400 bg-green-900/20 border-green-500/20'}`}>
                       {killStatus}
                     </div>
                   )}
@@ -201,13 +217,19 @@ export default function Dashboard() {
                               headers['Authorization'] = `Bearer ${apiKey}`;
                             }
                             const res = await fetch(`${API_BASE}/process/kill`, { method: 'POST', headers });
-                            const data = await res.json();
-                            setKillStatus(`Process ${data.pid} killed successfully`);
+                            const data = await res.json().catch(() => ({} as { error?: string; pid?: number }));
+                            if (!res.ok) {
+                              throw new Error(data.error || `Request failed (${res.status})`);
+                            }
+                            setKillStatusIsError(false);
+                            setKillStatus(`Process ${data.pid ?? liveStats.pid} killed successfully`);
                             setKillConfirm(false);
                             mutate(`${API_BASE}/incidents`);
                             setTimeout(() => setKillStatus(null), 3000);
                           } catch (e) {
-                            setKillStatus('Failed to kill process');
+                            const msg = e instanceof Error ? e.message : 'Failed to kill process';
+                            setKillStatusIsError(true);
+                            setKillStatus(`Kill failed: ${msg}`);
                             setKillConfirm(false);
                           }
                         }}

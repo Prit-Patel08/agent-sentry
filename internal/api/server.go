@@ -4,6 +4,7 @@ import (
 	"agent-sentry/internal/database"
 	"agent-sentry/internal/metrics"
 	"agent-sentry/internal/state"
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -440,12 +441,8 @@ func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 func actorFromRequest(r *http.Request) string {
 	authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
 	if strings.HasPrefix(authHeader, "Bearer ") {
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-		token = strings.TrimSpace(token)
-		if len(token) > 6 {
-			token = token[:6]
-		}
-		return "token:" + token
+		// Never persist any token material in audit logs.
+		return "api-key"
 	}
 	return "anonymous"
 }
@@ -458,8 +455,8 @@ func mutationReason(r *http.Request) string {
 	if err != nil || len(body) == 0 {
 		return ""
 	}
-	// Restore an empty body for handlers that might read again in the future.
-	r.Body = io.NopCloser(strings.NewReader(string(body)))
+	// Restore the body for handlers that might read again in the future.
+	r.Body = io.NopCloser(bytes.NewReader(body))
 	type reqBody struct {
 		Reason string `json:"reason"`
 	}
