@@ -1597,6 +1597,19 @@ Decision rule:
 7. formalize SLO dashboard and error-budget policy doc
 8. run first chaos drill and publish findings
 
+### 42.1) Status (Living Checklist)
+
+Last updated: 2026-02-19
+
+- [x] create and enforce PR templates (problem, scope, anti-goals, rollback)
+- [ ] add issue intake and incident postmortem templates
+- [ ] implement unified event schema design doc and migration plan
+- [ ] add canary + shadow mode controls to policy engine
+- [x] ship local daemon RFC for zero-command integrations
+- [x] define Cursor and Antigravity integration API contracts
+- [ ] formalize SLO dashboard and error-budget policy doc
+- [ ] run first chaos drill and publish findings
+
 ---
 
 ## 43) Definition of "Cloudflare-Level" for FlowForge

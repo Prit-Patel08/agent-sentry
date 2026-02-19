@@ -216,6 +216,8 @@ Report output:
 
 - operations: `docs/OPERATIONS.md`
 - branch protection: `docs/BRANCH_PROTECTION.md`
+- local daemon RFC (P1): `docs/DAEMON_RFC.md`
+- integration API contract (P1): `docs/INTEGRATION_API_CONTRACT.md`
 - threat model: `docs/THREAT_MODEL.md`
 - runbook: `docs/RUNBOOK.md`
 - onboarding usability test: `docs/ONBOARDING_USABILITY_TEST.md`
