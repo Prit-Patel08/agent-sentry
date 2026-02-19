@@ -1,0 +1,56 @@
+name: PR Template Gate
+
+on:
+  pull_request:
+    branches: ["main"]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate-pr-body:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate required PR sections
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.pull_request?.body || "";
+
+            const required = [
+              "## Problem Statement",
+              "## Scope",
+              "## Anti-Goals",
+              "## Tests",
+              "## Rollback Plan",
+            ];
+
+            const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+            const missing = [];
+            for (const heading of required) {
+              const pattern = `${escapeRegex(heading)}\\s*\\n+([\\s\\S]*?)(?=\\n##\\s|$)`;
+              const re = new RegExp(pattern, "i");
+              const match = body.match(re);
+
+              if (!match) {
+                missing.push(`${heading} (missing section)`);
+                continue;
+              }
+
+              const content = match[1].trim();
+              if (!content || /^(_?n\\/a_?|_?none_?)$/i.test(content)) {
+                missing.push(`${heading} (empty section)`);
+              }
+            }
+
+            if (missing.length > 0) {
+              core.setFailed(
+                "PR body must include all required sections with real content:\n" +
+                missing.map((m) => `- ${m}`).join("\n")
+              );
+            } else {
+              core.info("PR body includes all required sections.");
+            }

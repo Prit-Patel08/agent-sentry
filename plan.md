@@ -789,6 +789,17 @@ then reduce scope further and revalidate core problem before adding any new feat
 4. Publish release checklist and rollback checklist.
 5. Run one end-to-end onboarding usability test with a new developer.
 
+### 20.1) Status (Living Checklist)
+
+Last updated: 2026-02-19
+
+- [x] Finalize README rewrite aligned to this plan.
+- [x] Define and implement benchmark fixture set.
+- [x] Create one-page feature brief template and enforce in PRs.
+- [ ] Publish release checklist and rollback checklist.
+  Note: release checkpoint exists; explicit rollback checklist document still pending.
+- [ ] Run one end-to-end onboarding usability test with a new developer.
+
 ---
 
 ## 21) One-Paragraph Positioning Statement
@@ -2111,3 +2122,16 @@ Rationale:
 2. Corpus is needed to measure fp/fn and prevent regressions.
 3. Shadow mode de-risks policy enforcement.
 4. Evidence schema must capture all of the above with auditability.
+
+### K.1) Implementation Status (Living Checklist)
+
+Last updated: 2026-02-19
+
+- [x] J.1 runtime teardown correctness.
+  Implemented process-group supervision with SIGTERM->SIGKILL escalation and signal trapping, with tests.
+- [x] J.2 benchmark corpus.
+  Implemented fixture scripts + corpus harness + CI execution path.
+- [x] J.4 shadow-mode decider.
+  Implemented `ActionLogOnly`, reason strings, and enforce/shadow unit tests.
+- [x] J.3 append-only evidence schema baseline.
+  Implemented unified `events` table, append-only triggers, incident timeline query, and tests.
