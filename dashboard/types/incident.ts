@@ -16,11 +16,15 @@ export interface Incident {
 }
 
 export interface TimelineEvent {
-    type: "incident" | "audit" | "decision";
+    event_id?: string;
+    run_id?: string;
+    incident_id?: string;
+    type: string;
     timestamp: string;
     title: string;
     summary: string;
     reason: string;
+    actor?: string;
     pid?: number;
     cpu_score?: number;
     entropy_score?: number;

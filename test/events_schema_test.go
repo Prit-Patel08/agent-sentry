@@ -113,3 +113,69 @@ func TestEventsTableIsAppendOnly(t *testing.T) {
 		t.Fatalf("expected append-only delete error, got: %v", err)
 	}
 }
+
+func TestCorrelatedIncidentChainFromLoggingHelpers(t *testing.T) {
+	setupTempDB(t)
+	database.SetRunID("run-correlation")
+	incidentID := "incident-chain-1"
+
+	if err := database.LogDecisionTraceWithIncident(
+		"python3 worker.py",
+		4242,
+		98.4,
+		10.0,
+		96.5,
+		"KILL",
+		"CPU exceeded 90% for 30s AND log entropy dropped below 0.20",
+		incidentID,
+	); err != nil {
+		t.Fatalf("log decision trace: %v", err)
+	}
+
+	if err := database.LogAuditEventWithIncident(
+		"flowforge",
+		"AUTO_KILL",
+		"automatic intervention",
+		"monitor",
+		4242,
+		"python3 worker.py",
+		incidentID,
+	); err != nil {
+		t.Fatalf("log audit event: %v", err)
+	}
+
+	if err := database.LogIncidentWithDecisionForIncident(
+		"python3 worker.py",
+		"gpt-4",
+		"LOOP_DETECTED",
+		98.4,
+		"processing request <NUM> failed, retrying endlessly",
+		2.5,
+		100,
+		0.01,
+		"agent-1",
+		"1.0.0",
+		"automatic intervention",
+		98.4,
+		10.0,
+		96.5,
+		"terminated",
+		0,
+		incidentID,
+	); err != nil {
+		t.Fatalf("log incident: %v", err)
+	}
+
+	timeline, err := database.GetIncidentTimelineByIncidentID(incidentID, 10)
+	if err != nil {
+		t.Fatalf("get timeline: %v", err)
+	}
+	if len(timeline) < 3 {
+		t.Fatalf("expected at least 3 correlated events, got %d", len(timeline))
+	}
+	for _, ev := range timeline {
+		if ev.IncidentID != incidentID {
+			t.Fatalf("unexpected incident_id in timeline: %q", ev.IncidentID)
+		}
+	}
+}

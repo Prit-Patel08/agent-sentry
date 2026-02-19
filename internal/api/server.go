@@ -19,6 +19,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -395,7 +397,8 @@ func HandleProcessKill(w http.ResponseWriter, r *http.Request) {
 	if reason == "" {
 		reason = "manual API kill request"
 	}
-	_ = database.LogAuditEvent(actorFromRequest(r), "KILL", reason, "api", stats.PID, stats.Command)
+	incidentID := uuid.NewString()
+	_ = database.LogAuditEventWithIncident(actorFromRequest(r), "KILL", reason, "api", stats.PID, stats.Command, incidentID)
 
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"status":"killed","pid":%d}`, stats.PID)
@@ -446,7 +449,8 @@ func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 	if reason == "" {
 		reason = "manual API restart request"
 	}
-	_ = database.LogAuditEvent(actorFromRequest(r), "RESTART", reason, "api", stats.PID, stats.Command)
+	incidentID := uuid.NewString()
+	_ = database.LogAuditEventWithIncident(actorFromRequest(r), "RESTART", reason, "api", stats.PID, stats.Command, incidentID)
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"status":"restarting","command":"%s"}`, stats.Command)
 }

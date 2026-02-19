@@ -492,6 +492,7 @@ func runProcess(args []string) {
 						if time.Since(lastWatchdogAlert) > cooldown {
 							lastWatchdogAlert = time.Now()
 							watchdogEscalationLevel++
+							incidentID := uuid.NewString()
 
 							alertType := "WATCHDOG_ALERT"
 							if watchdogEscalationLevel == 2 {
@@ -511,7 +512,8 @@ func runProcess(args []string) {
 							finalTokens := int(observer.TotalTokens())
 							finalCost := tokens.EstimateCost(finalTokens, modelName)
 
-							_ = database.LogIncidentWithDecision(
+							_ = database.LogDecisionTraceWithIncident(fullCommand, pid, cpuScore, entropyScore, confidenceScore, decision.Action.String(), reason, incidentID)
+							_ = database.LogIncidentWithDecisionForIncident(
 								fullCommand,
 								modelName,
 								alertType,
@@ -528,8 +530,9 @@ func runProcess(args []string) {
 								confidenceScore,
 								"watchdog",
 								0,
+								incidentID,
 							)
-							_ = database.LogAuditEvent("flowforge", "WATCHDOG_ALERT", reason, "monitor", pid, fullCommand)
+							_ = database.LogAuditEventWithIncident("flowforge", "WATCHDOG_ALERT", reason, "monitor", pid, fullCommand, incidentID)
 
 							wd, _ := os.Getwd()
 							state.UpdateState(
@@ -544,14 +547,20 @@ func runProcess(args []string) {
 						}
 					case policy.ActionLogOnly:
 						fmt.Printf("\n[FlowForge] 🧪 %s\n", reason)
-						_ = database.LogPolicyDryRun(fullCommand, pid, reason, confidenceScore)
+						incidentID := uuid.NewString()
+						_ = database.LogDecisionTraceWithIncident(fullCommand, pid, cpuScore, entropyScore, confidenceScore, decision.Action.String(), reason, incidentID)
+						_ = database.LogPolicyDryRunWithIncident(fullCommand, pid, reason, confidenceScore, incidentID)
 					case policy.ActionKill, policy.ActionRestart:
 						if noKill {
 							// Legacy watchdog mode always suppresses destructive actions.
 							fmt.Printf("\n[FlowForge] WATCHDOG MODE: %s\n", reason)
-							_ = database.LogPolicyDryRun(fullCommand, pid, "watchdog mode blocked destructive action: "+reason, confidenceScore)
+							incidentID := uuid.NewString()
+							blockedReason := "watchdog mode blocked destructive action: " + reason
+							_ = database.LogDecisionTraceWithIncident(fullCommand, pid, cpuScore, entropyScore, confidenceScore, "ACTION_BLOCKED", blockedReason, incidentID)
+							_ = database.LogPolicyDryRunWithIncident(fullCommand, pid, blockedReason, confidenceScore, incidentID)
 							continue
 						}
+						incidentID := uuid.NewString()
 
 						patterns.SyncPatterns(firstNormalized)
 						feedback.GenerateFeedback(feedback.FeedbackData{
@@ -574,7 +583,8 @@ func runProcess(args []string) {
 						finalTokens := int(observer.TotalTokens())
 						finalCost := tokens.EstimateCost(finalTokens, modelName)
 
-						_ = database.LogIncidentWithDecision(
+						_ = database.LogDecisionTraceWithIncident(fullCommand, pid, cpuScore, entropyScore, confidenceScore, decision.Action.String(), reason, incidentID)
+						_ = database.LogIncidentWithDecisionForIncident(
 							fullCommand,
 							modelName,
 							exitReason,
@@ -591,8 +601,9 @@ func runProcess(args []string) {
 							confidenceScore,
 							"terminated",
 							0,
+							incidentID,
 						)
-						_ = database.LogAuditEvent("flowforge", actionName, reason, "monitor", pid, fullCommand)
+						_ = database.LogAuditEventWithIncident("flowforge", actionName, reason, "monitor", pid, fullCommand, incidentID)
 
 						wd, _ := os.Getwd()
 						state.UpdateState(
@@ -669,10 +680,11 @@ func runProcess(args []string) {
 		fmt.Printf("\n[FlowForge] Received signal: %v. Cleaning up process group...\n", sig)
 
 		userTerminated.Store(true)
+		incidentID := uuid.NewString()
 		finalTokens := int(observer.TotalTokens())
 		finalCost := tokens.EstimateCost(finalTokens, modelName)
-		_ = database.LogIncident(fullCommand, modelName, "USER_TERMINATED", maxObservedCpu, "N/A", time.Since(startTime).Seconds(), finalTokens, finalCost, agentID, agentVersion)
-		_ = database.LogAuditEvent("operator", "TERMINATE", "received OS signal", "cli", pid, fullCommand)
+		_ = database.LogIncidentWithDecisionForIncident(fullCommand, modelName, "USER_TERMINATED", maxObservedCpu, "N/A", time.Since(startTime).Seconds(), finalTokens, finalCost, agentID, agentVersion, "received OS signal", 0, 0, 0, "terminated", 0, incidentID)
+		_ = database.LogAuditEventWithIncident("operator", "TERMINATE", "received OS signal", "cli", pid, fullCommand, incidentID)
 
 		wd, _ := os.Getwd()
 		state.UpdateState(

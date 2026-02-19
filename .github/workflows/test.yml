@@ -38,6 +38,9 @@ jobs:
       - name: Race Detector
         run: go test ./... -race -v
 
+      - name: Benchmark Corpus Gate
+        run: ./scripts/benchmark_corpus.sh ci_artifacts/corpus
+
       - name: Staticcheck
         run: |
           "$(go env GOPATH)/bin/staticcheck" ./...
