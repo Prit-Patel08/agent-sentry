@@ -10,6 +10,12 @@ chmod +x scripts/install.sh
 ./scripts/install.sh --open-browser
 ```
 
+Build/setup only (no long-running services):
+
+```bash
+./scripts/install.sh --no-services --no-demo
+```
+
 What you should see:
 1. secure API keys generated once in `.flowforge.env`
    - existing legacy keys are auto-migrated to `FLOWFORGE_*`

@@ -5,6 +5,8 @@ Configure `main` with required status checks before merge.
 Required checks:
 - `backend`
 - `dashboard`
+- `smoke`
+- `docker`
 - `sbom`
 
 Recommended settings:

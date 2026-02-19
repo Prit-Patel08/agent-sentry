@@ -12,6 +12,7 @@ import StatCard from '../components/StatCard';
 import TimelinePanel from '../components/TimelinePanel';
 import IncidentDrilldownPanel from '../components/IncidentDrilldownPanel';
 import Head from 'next/head';
+import { useRouter } from 'next/router';
 import { ShieldAlert, Zap, Activity, ServerCrash, Terminal, Cpu, Skull } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -46,6 +47,7 @@ interface LiveStats {
 }
 
 export default function Dashboard() {
+  const router = useRouter();
   const { data: incidents, error } = useSWR<Incident[]>(
     `${API_BASE}/incidents`,
     fetchIncidents,
@@ -57,6 +59,7 @@ export default function Dashboard() {
     { refreshInterval: 3000, fallbackData: [] }
   );
   const [selectedIncidentID, setSelectedIncidentID] = useState<string | null>(null);
+  const [incidentShareURL, setIncidentShareURL] = useState<string | null>(null);
   const {
     data: incidentChain,
     error: incidentChainError,
@@ -118,6 +121,28 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    if (!router.isReady) {
+      return;
+    }
+
+    const incidentFromURL = router.query.incident;
+    if (typeof incidentFromURL === 'string' && incidentFromURL.trim() !== '') {
+      setSelectedIncidentID(incidentFromURL.trim());
+    }
+  }, [router.isReady, router.query.incident]);
+
+  useEffect(() => {
+    if (!selectedIncidentID || typeof window === 'undefined') {
+      setIncidentShareURL(null);
+      return;
+    }
+
+    const shareURL = new URL(window.location.href);
+    shareURL.searchParams.set('incident', selectedIncidentID);
+    setIncidentShareURL(shareURL.toString());
+  }, [selectedIncidentID]);
+
+  useEffect(() => {
     if (!timeline || timeline.length === 0) {
       return;
     }
@@ -129,8 +154,15 @@ export default function Dashboard() {
     const nextIncident = timeline.find((event) => event.incident_id)?.incident_id;
     if (nextIncident) {
       setSelectedIncidentID(nextIncident);
+      if (router.isReady && router.query.incident !== nextIncident) {
+        void router.replace(
+          { pathname: router.pathname, query: { ...router.query, incident: nextIncident } },
+          undefined,
+          { shallow: true }
+        );
+      }
     }
-  }, [timeline, selectedIncidentID]);
+  }, [timeline, selectedIncidentID, router]);
 
   // Calculate Stats
   const totalIncidents = incidents?.length || 0;
@@ -378,13 +410,23 @@ export default function Dashboard() {
               <TimelinePanel
                 events={timeline || []}
                 selectedIncidentId={selectedIncidentID}
-                onSelectIncident={(incidentId) => setSelectedIncidentID(incidentId)}
+                onSelectIncident={(incidentId) => {
+                  setSelectedIncidentID(incidentId);
+                  if (router.isReady && router.query.incident !== incidentId) {
+                    void router.replace(
+                      { pathname: router.pathname, query: { ...router.query, incident: incidentId } },
+                      undefined,
+                      { shallow: true }
+                    );
+                  }
+                }}
               />
               <IncidentDrilldownPanel
                 incidentId={selectedIncidentID}
                 events={incidentChain || []}
                 loading={incidentChainLoading}
                 error={incidentChainError instanceof Error ? incidentChainError.message : null}
+                shareUrl={incidentShareURL}
               />
             </div>
           </div>

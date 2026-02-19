@@ -1,4 +1,5 @@
 import { formatDistanceToNow } from 'date-fns';
+import { useEffect, useMemo, useState } from 'react';
 import { IncidentChainEvent } from '../types/incident';
 
 interface IncidentDrilldownPanelProps {
@@ -6,10 +7,48 @@ interface IncidentDrilldownPanelProps {
   events: IncidentChainEvent[];
   loading: boolean;
   error: string | null;
+  shareUrl: string | null;
 }
 
-export default function IncidentDrilldownPanel({ incidentId, events, loading, error }: IncidentDrilldownPanelProps) {
+export default function IncidentDrilldownPanel({ incidentId, events, loading, error, shareUrl }: IncidentDrilldownPanelProps) {
   const parseTs = (raw: string) => new Date(raw.includes('T') ? raw : raw.replace(' ', 'T'));
+  const [eventFilter, setEventFilter] = useState<string>('all');
+  const [copyStatus, setCopyStatus] = useState<string>('');
+
+  useEffect(() => {
+    setEventFilter('all');
+    setCopyStatus('');
+  }, [incidentId]);
+
+  const eventTypes = useMemo(() => {
+    const seen = new Set<string>();
+    events.forEach((event) => {
+      if (event.event_type) {
+        seen.add(event.event_type);
+      }
+    });
+    return ['all', ...Array.from(seen).sort()];
+  }, [events]);
+
+  const filteredEvents = useMemo(() => {
+    if (eventFilter === 'all') {
+      return events;
+    }
+    return events.filter((event) => event.event_type === eventFilter);
+  }, [events, eventFilter]);
+
+  const copyText = async (value: string, label: string) => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      setCopyStatus(`${label} copy unsupported in this browser`);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyStatus(`${label} copied`);
+    } catch {
+      setCopyStatus(`${label} copy failed`);
+    }
+  };
 
   return (
     <div className="rounded-xl border border-gray-800 bg-obsidian-800 p-4 shadow-lg">
@@ -26,6 +65,55 @@ export default function IncidentDrilldownPanel({ incidentId, events, loading, er
         <p className="text-sm text-gray-500">Select an incident group in the timeline to inspect the full decision and action chain.</p>
       )}
 
+      {incidentId && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => copyText(incidentId, 'Incident ID')}
+            className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-800"
+          >
+            Copy incident ID
+          </button>
+          {shareUrl && (
+            <>
+              <button
+                type="button"
+                onClick={() => copyText(shareUrl, 'Share link')}
+                className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-[11px] text-gray-300 hover:bg-gray-800"
+              >
+                Copy link
+              </button>
+              <a
+                href={shareUrl}
+                className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-[11px] text-accent-300 hover:bg-gray-800"
+              >
+                Open link
+              </a>
+            </>
+          )}
+          {copyStatus && <span className="text-[11px] text-gray-500">{copyStatus}</span>}
+        </div>
+      )}
+
+      {incidentId && eventTypes.length > 1 && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {eventTypes.map((type) => (
+            <button
+              key={type}
+              type="button"
+              onClick={() => setEventFilter(type)}
+              className={`rounded px-2 py-1 text-[11px] uppercase tracking-wide ${
+                eventFilter === type
+                  ? 'border border-accent-500/60 bg-accent-500/10 text-accent-300'
+                  : 'border border-gray-700 bg-gray-900 text-gray-400 hover:bg-gray-800'
+              }`}
+            >
+              {type}
+            </button>
+          ))}
+        </div>
+      )}
+
       {incidentId && loading && (
         <p className="text-sm text-gray-400">Loading incident timeline...</p>
       )}
@@ -36,13 +124,15 @@ export default function IncidentDrilldownPanel({ incidentId, events, loading, er
         </div>
       )}
 
-      {incidentId && !loading && !error && events.length === 0 && (
-        <p className="text-sm text-gray-500">No correlated events were returned for this incident.</p>
+      {incidentId && !loading && !error && filteredEvents.length === 0 && (
+        <p className="text-sm text-gray-500">
+          {events.length === 0 ? 'No correlated events were returned for this incident.' : 'No events matched the selected filter.'}
+        </p>
       )}
 
-      {incidentId && !loading && !error && events.length > 0 && (
+      {incidentId && !loading && !error && filteredEvents.length > 0 && (
         <div className="space-y-2">
-          {events.map((event, idx) => (
+          {filteredEvents.map((event, idx) => (
             <div key={`${event.event_id || idx}-${event.created_at}`} className="rounded border border-gray-800 bg-black/20 p-3">
               <div className="mb-1 flex items-center justify-between">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-accent-300">

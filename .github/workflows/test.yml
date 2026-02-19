@@ -107,6 +107,46 @@ jobs:
           name: smoke-gate
           path: ci_artifacts/smoke
 
+  docker:
+    runs-on: ubuntu-latest
+    needs: [backend]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build runtime image
+        run: docker build -t flowforge-ci -f internal/deploy/Dockerfile .
+
+      - name: Verify non-root user
+        run: |
+          USER_CFG="$(docker image inspect -f '{{.Config.User}}' flowforge-ci)"
+          test "$USER_CFG" = "65532:65532"
+
+      - name: Verify healthcheck command
+        run: |
+          HEALTH_CFG="$(docker image inspect -f '{{json .Config.Healthcheck.Test}}' flowforge-ci)"
+          echo "$HEALTH_CFG"
+          echo "$HEALTH_CFG" | grep '"/probe"'
+
+      - name: Runtime health smoke
+        run: |
+          docker run -d --name flowforge-runtime --entrypoint /flowforge flowforge-ci dashboard
+          for i in $(seq 1 40); do
+            STATUS="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' flowforge-runtime)"
+            if [ "$STATUS" = "healthy" ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs flowforge-runtime
+          exit 1
+
+      - name: Cleanup runtime container
+        if: always()
+        run: |
+          docker logs flowforge-runtime || true
+          docker rm -f flowforge-runtime || true
+
   sbom:
     runs-on: ubuntu-latest
     steps:

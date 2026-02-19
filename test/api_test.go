@@ -6,11 +6,75 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"flowforge/internal/api"
 	"flowforge/internal/database"
 )
+
+func stringValue(v interface{}) string {
+	s, _ := v.(string)
+	return s
+}
+
+func boolNonEmptyString(v interface{}) bool {
+	s, ok := v.(string)
+	return ok && s != ""
+}
+
+func floatValue(v interface{}) float64 {
+	f, ok := v.(float64)
+	if !ok {
+		return 0
+	}
+	return f
+}
+
+func intValue(v interface{}) int {
+	f, ok := v.(float64)
+	if !ok {
+		return 0
+	}
+	return int(f)
+}
+
+func snapshotTimelineEvent(raw map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"actor":            stringValue(raw["actor"]),
+		"confidence_score": floatValue(raw["confidence_score"]),
+		"cpu_score":        floatValue(raw["cpu_score"]),
+		"entropy_score":    floatValue(raw["entropy_score"]),
+		"has_event_id":     boolNonEmptyString(raw["event_id"]),
+		"has_incident_id":  boolNonEmptyString(raw["incident_id"]),
+		"has_run_id":       boolNonEmptyString(raw["run_id"]),
+		"has_timestamp":    boolNonEmptyString(raw["timestamp"]),
+		"pid":              intValue(raw["pid"]),
+		"reason":           stringValue(raw["reason"]),
+		"summary":          stringValue(raw["summary"]),
+		"title":            stringValue(raw["title"]),
+		"type":             stringValue(raw["type"]),
+	}
+}
+
+func snapshotIncidentTimelineEvent(raw map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"actor":            stringValue(raw["actor"]),
+		"confidence_score": floatValue(raw["confidence_score"]),
+		"cpu_score":        floatValue(raw["cpu_score"]),
+		"entropy_score":    floatValue(raw["entropy_score"]),
+		"event_type":       stringValue(raw["event_type"]),
+		"has_created_at":   boolNonEmptyString(raw["created_at"]),
+		"has_event_id":     boolNonEmptyString(raw["event_id"]),
+		"has_timestamp":    boolNonEmptyString(raw["timestamp"]),
+		"incident_id":      stringValue(raw["incident_id"]),
+		"pid":              intValue(raw["pid"]),
+		"reason_text":      stringValue(raw["reason_text"]),
+		"run_id":           stringValue(raw["run_id"]),
+		"title":            stringValue(raw["title"]),
+		"type":             stringValue(raw["type"]),
+	}
+}
 
 func setupTempDBForAPI(t *testing.T) {
 	t.Helper()
@@ -242,6 +306,129 @@ func TestTimelineEndpointIncidentFilterAndContract(t *testing.T) {
 				t.Fatalf("expected non-empty string for key %q, got %#v", key, raw)
 			}
 		}
+	}
+}
+
+func TestTimelineEndpointSnapshotContract(t *testing.T) {
+	setupTempDBForAPI(t)
+	database.SetRunID("run-api-snapshot")
+	incidentID := "incident-snapshot-001"
+
+	if _, err := database.InsertEvent(
+		"decision",
+		"system",
+		"CPU exceeded threshold",
+		"run-api-snapshot",
+		incidentID,
+		"KILL",
+		"CPU 92 / Entropy 21 / Confidence 93",
+		4242,
+		92.0,
+		21.0,
+		93.0,
+	); err != nil {
+		t.Fatalf("insert event: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/timeline", nil)
+	w := httptest.NewRecorder()
+	api.HandleTimeline(w, req)
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var payload []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload) == 0 {
+		t.Fatal("expected timeline payload to include at least one event")
+	}
+
+	got := snapshotTimelineEvent(payload[0])
+	expected := map[string]interface{}{
+		"actor":            "system",
+		"confidence_score": 93.0,
+		"cpu_score":        92.0,
+		"entropy_score":    21.0,
+		"has_event_id":     true,
+		"has_incident_id":  true,
+		"has_run_id":       true,
+		"has_timestamp":    true,
+		"pid":              4242,
+		"reason":           "CPU exceeded threshold",
+		"summary":          "CPU 92 / Entropy 21 / Confidence 93",
+		"title":            "KILL",
+		"type":             "decision",
+	}
+
+	if !reflect.DeepEqual(got, expected) {
+		gotJSON, _ := json.MarshalIndent(got, "", "  ")
+		expJSON, _ := json.MarshalIndent(expected, "", "  ")
+		t.Fatalf("timeline snapshot mismatch\nexpected:\n%s\ngot:\n%s", expJSON, gotJSON)
+	}
+}
+
+func TestTimelineIncidentEndpointSnapshotContract(t *testing.T) {
+	setupTempDBForAPI(t)
+	database.SetRunID("run-api-snapshot")
+	incidentID := "incident-snapshot-002"
+
+	if _, err := database.InsertEvent(
+		"audit",
+		"api-key",
+		"operator requested restart",
+		"run-api-snapshot",
+		incidentID,
+		"RESTART",
+		"manual restart by operator",
+		5151,
+		0,
+		0,
+		0,
+	); err != nil {
+		t.Fatalf("insert event: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/timeline?incident_id="+incidentID, nil)
+	w := httptest.NewRecorder()
+	api.HandleTimeline(w, req)
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var payload []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload) != 1 {
+		t.Fatalf("expected 1 event for incident timeline, got %d", len(payload))
+	}
+
+	got := snapshotIncidentTimelineEvent(payload[0])
+	expected := map[string]interface{}{
+		"actor":            "api-key",
+		"confidence_score": 0.0,
+		"cpu_score":        0.0,
+		"entropy_score":    0.0,
+		"event_type":       "audit",
+		"has_created_at":   true,
+		"has_event_id":     true,
+		"has_timestamp":    true,
+		"incident_id":      incidentID,
+		"pid":              5151,
+		"reason_text":      "operator requested restart",
+		"run_id":           "run-api-snapshot",
+		"title":            "RESTART",
+		"type":             "audit",
+	}
+
+	if !reflect.DeepEqual(got, expected) {
+		gotJSON, _ := json.MarshalIndent(got, "", "  ")
+		expJSON, _ := json.MarshalIndent(expected, "", "  ")
+		t.Fatalf("incident timeline snapshot mismatch\nexpected:\n%s\ngot:\n%s", expJSON, gotJSON)
 	}
 }
 

@@ -7,11 +7,25 @@ DASHBOARD_PORT="${DASHBOARD_PORT:-3001}"
 ENV_FILE=".flowforge.env"
 OPEN_BROWSER=0
 RUN_DEMO="${RUN_DEMO:-1}"
+START_SERVICES=1
 
 for arg in "$@"; do
   case "$arg" in
     --open-browser) OPEN_BROWSER=1 ;;
     --no-demo) RUN_DEMO=0 ;;
+    --no-services) START_SERVICES=0 ;;
+    -h|--help)
+      cat <<EOF
+Usage: ./scripts/install.sh [options]
+
+Options:
+  --open-browser   Open dashboard URL after startup
+  --no-demo        Skip the 60-second value demo
+  --no-services    Build and configure only; do not start API/dashboard
+  -h, --help       Show this help text
+EOF
+      exit 0
+      ;;
   esac
 done
 
@@ -66,6 +80,22 @@ wait_for_http() {
   done
   echo "Timed out waiting for $url" >&2
   return 1
+}
+
+print_completion_summary() {
+  local started="$1"
+  echo "------------------------------------------------"
+  echo "FlowForge setup complete"
+  echo "Mode: ${started}"
+  echo "Env file: ${ENV_FILE}"
+  echo "API base: http://localhost:${API_PORT}"
+  echo "Dashboard: http://localhost:${DASHBOARD_PORT}"
+  echo ""
+  echo "Next commands:"
+  echo "  ./flowforge demo"
+  echo "  ./flowforge run -- python3 your_script.py"
+  echo "  ./scripts/smoke_local.sh"
+  echo "------------------------------------------------"
 }
 
 GENERATED_API_KEY=""
@@ -151,6 +181,11 @@ if [[ "$RUN_DEMO" == "1" ]]; then
   FLOWFORGE_DB_PATH="${FLOWFORGE_DB_PATH:-flowforge.db}" ./flowforge demo || true
 fi
 
+if [[ "$START_SERVICES" != "1" ]]; then
+  print_completion_summary "build-only"
+  exit 0
+fi
+
 if command -v lsof >/dev/null 2>&1; then
   echo "🧹 Clearing ports ${API_PORT} and ${DASHBOARD_PORT}..."
   lsof -t -i :"${API_PORT}" -i :"${DASHBOARD_PORT}" | xargs kill -9 2>/dev/null || true
@@ -199,6 +234,8 @@ if [[ "$OPEN_BROWSER" == "1" ]]; then
     xdg-open "http://localhost:${DASHBOARD_PORT}" || true
   fi
 fi
+
+print_completion_summary "services-running"
 
 echo "Services are running. Press Ctrl+C to stop."
 wait

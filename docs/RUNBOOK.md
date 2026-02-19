@@ -6,6 +6,12 @@
 ./scripts/install.sh --open-browser
 ```
 
+Build/setup without starting services:
+
+```bash
+./scripts/install.sh --no-services --no-demo
+```
+
 Or backend only:
 
 ```bash
