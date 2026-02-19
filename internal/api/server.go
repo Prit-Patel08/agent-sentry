@@ -304,6 +304,19 @@ func HandleTimeline(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if incidentID := strings.TrimSpace(r.URL.Query().Get("incident_id")); incidentID != "" {
+		events, err := database.GetIncidentTimelineByIncidentID(incidentID, 500)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Database error: %v", err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(events); err != nil {
+			http.Error(w, fmt.Sprintf("Encode error: %v", err), http.StatusInternalServerError)
+		}
+		return
+	}
+
 	events, err := database.GetTimeline(100)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Database error: %v", err), http.StatusInternalServerError)

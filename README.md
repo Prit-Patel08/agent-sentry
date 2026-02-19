@@ -28,6 +28,12 @@ Supervise your own command:
 ./flowforge run -- python3 your_script.py
 ```
 
+Run policy in dry-run mode (evaluate and log only):
+
+```bash
+./flowforge run --shadow-mode -- python3 your_script.py
+```
+
 Run demo again:
 
 ```bash
@@ -92,6 +98,7 @@ process -> monitor -> decision -> action -> DB events -> API -> dashboard
 - `GET /stream`
 - `GET /incidents`
 - `GET /timeline`
+- `GET /timeline?incident_id=<id>`
 - `GET /metrics`
 - `POST /process/kill`
 - `POST /process/restart`
@@ -108,6 +115,11 @@ go test ./test -bench Detection -benchmem
 Fixtures:
 - runaway logs: `test/fixtures/runaway.txt`
 - healthy logs: `test/fixtures/healthy.txt`
+- corpus scripts:
+  - `test/fixtures/scripts/infinite_looper.py`
+  - `test/fixtures/scripts/memory_leaker.py`
+  - `test/fixtures/scripts/healthy_spike.py`
+  - `test/fixtures/scripts/zombie_spawner.py`
 
 ## Build and Validation
 

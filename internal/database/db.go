@@ -6,12 +6,18 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 var db *sql.DB
+var runContext struct {
+	mu    sync.RWMutex
+	runID string
+}
 
 type Incident struct {
 	ID                   int     `json:"id"`
@@ -162,6 +168,13 @@ func InitDB() error {
 
 	createEventsTableSQL := `CREATE TABLE IF NOT EXISTS events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		event_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		incident_id TEXT,
+		event_type TEXT NOT NULL,
+		actor TEXT NOT NULL DEFAULT 'system',
+		reason_text TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
 		type TEXT NOT NULL,
 		title TEXT NOT NULL,
@@ -176,11 +189,66 @@ func InitDB() error {
 		return err
 	}
 
+	// Events table migrations for older installs.
+	db.Exec("ALTER TABLE events ADD COLUMN event_id TEXT;")
+	db.Exec("ALTER TABLE events ADD COLUMN run_id TEXT DEFAULT 'unknown-run';")
+	db.Exec("ALTER TABLE events ADD COLUMN incident_id TEXT;")
+	db.Exec("ALTER TABLE events ADD COLUMN event_type TEXT DEFAULT 'legacy';")
+	db.Exec("ALTER TABLE events ADD COLUMN actor TEXT DEFAULT 'system';")
+	db.Exec("ALTER TABLE events ADD COLUMN reason_text TEXT DEFAULT '';")
+	db.Exec("ALTER TABLE events ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP;")
+
+	// Backfill required columns where possible.
+	db.Exec("UPDATE events SET event_id = COALESCE(event_id, lower(hex(randomblob(16)))) WHERE event_id IS NULL OR event_id = '';")
+	db.Exec("UPDATE events SET run_id = COALESCE(NULLIF(run_id, ''), 'unknown-run');")
+	db.Exec("UPDATE events SET event_type = COALESCE(NULLIF(event_type, ''), COALESCE(type, 'legacy'));")
+	db.Exec("UPDATE events SET reason_text = COALESCE(reason_text, reason, '');")
+	db.Exec("UPDATE events SET created_at = COALESCE(created_at, timestamp, CURRENT_TIMESTAMP);")
+
+	if _, err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_events_event_id ON events(event_id);"); err != nil {
+		return err
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_events_incident_created ON events(incident_id, created_at);"); err != nil {
+		return err
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_events_run_created ON events(run_id, created_at);"); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS trg_events_no_update
+	BEFORE UPDATE ON events
+	BEGIN
+		SELECT RAISE(ABORT, 'events table is append-only');
+	END;`); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS trg_events_no_delete
+	BEFORE DELETE ON events
+	BEGIN
+		SELECT RAISE(ABORT, 'events table is append-only');
+	END;`); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func GetDB() *sql.DB {
 	return db
+}
+
+func SetRunID(runID string) {
+	runContext.mu.Lock()
+	defer runContext.mu.Unlock()
+	runContext.runID = runID
+}
+
+func currentRunID() string {
+	runContext.mu.RLock()
+	defer runContext.mu.RUnlock()
+	if runContext.runID == "" {
+		return "unknown-run"
+	}
+	return runContext.runID
 }
 
 func CloseDB() {
@@ -232,7 +300,8 @@ func LogIncidentWithDecision(
 	if err != nil {
 		return err
 	}
-	return logUnifiedEvent("incident", exitReason, fmt.Sprintf("%s (CPU %.1f%%)", exitReason, maxCpu), reason, 0, cpuScore, entropyScore, confidenceScore)
+	incidentID := uuid.NewString()
+	return logUnifiedEventWithMeta("incident", exitReason, fmt.Sprintf("%s (CPU %.1f%%)", exitReason, maxCpu), reason, "system", incidentID, 0, cpuScore, entropyScore, confidenceScore)
 }
 
 func GetIncidentByID(id int) (Incident, error) {
@@ -296,7 +365,7 @@ func LogAuditEvent(actor, action, reason, source string, pid int, details string
 	if err != nil {
 		return err
 	}
-	return logUnifiedEvent("audit", action, fmt.Sprintf("%s by %s", action, actor), reason, pid, 0, 0, 0)
+	return logUnifiedEventWithMeta("audit", action, fmt.Sprintf("%s by %s", action, actor), reason, actor, "", pid, 0, 0, 0)
 }
 
 func GetAuditEvents(limit int) ([]AuditEvent, error) {
@@ -336,7 +405,7 @@ func LogDecisionTrace(command string, pid int, cpuScore, entropyScore, confidenc
 		return err
 	}
 	summary := fmt.Sprintf("CPU %.1f / Entropy %.1f / Confidence %.1f", cpuScore, entropyScore, confidenceScore)
-	return logUnifiedEvent("decision", decision, summary, reason, pid, cpuScore, entropyScore, confidenceScore)
+	return logUnifiedEventWithMeta("decision", decision, summary, reason, "system", "", pid, cpuScore, entropyScore, confidenceScore)
 }
 
 func GetDecisionTraces(limit int) ([]DecisionTrace, error) {
@@ -477,7 +546,7 @@ func GetUnifiedEvents(limit int) ([]UnifiedEvent, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := db.Query("SELECT id, timestamp, COALESCE(type, ''), COALESCE(title, ''), COALESCE(summary, ''), COALESCE(reason, ''), COALESCE(pid, 0), COALESCE(cpu_score, 0.0), COALESCE(entropy_score, 0.0), COALESCE(confidence_score, 0.0) FROM events ORDER BY id DESC LIMIT ?", limit)
+	rows, err := db.Query("SELECT id, COALESCE(created_at, timestamp, CURRENT_TIMESTAMP), COALESCE(event_type, type, ''), COALESCE(title, ''), COALESCE(summary, ''), COALESCE(reason_text, reason, ''), COALESCE(pid, 0), COALESCE(cpu_score, 0.0), COALESCE(entropy_score, 0.0), COALESCE(confidence_score, 0.0) FROM events ORDER BY created_at DESC, id DESC LIMIT ?", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -493,17 +562,116 @@ func GetUnifiedEvents(limit int) ([]UnifiedEvent, error) {
 	return list, nil
 }
 
-func logUnifiedEvent(eventType, title, summary, reason string, pid int, cpuScore, entropyScore, confidenceScore float64) error {
+func GetIncidentTimelineByIncidentID(incidentID string, limit int) ([]UnifiedEvent, error) {
 	if db == nil {
-		return fmt.Errorf("db not initialized")
+		return nil, fmt.Errorf("db missing")
 	}
-	stmt, err := db.Prepare("INSERT INTO events(type, title, summary, reason, pid, cpu_score, entropy_score, confidence_score) VALUES(?, ?, ?, ?, ?, ?, ?, ?)")
+	if incidentID == "" {
+		return nil, fmt.Errorf("incident_id is required")
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	const incidentTimelineSQL = `
+SELECT
+	id,
+	COALESCE(created_at, timestamp, CURRENT_TIMESTAMP) AS ts,
+	COALESCE(event_type, type, '') AS event_type,
+	COALESCE(title, '') AS title,
+	COALESCE(summary, '') AS summary,
+	COALESCE(reason_text, reason, '') AS reason_text,
+	COALESCE(pid, 0) AS pid,
+	COALESCE(cpu_score, 0.0) AS cpu_score,
+	COALESCE(entropy_score, 0.0) AS entropy_score,
+	COALESCE(confidence_score, 0.0) AS confidence_score
+FROM events
+WHERE incident_id = ?
+ORDER BY created_at ASC, id ASC
+LIMIT ?;
+`
+	rows, err := db.Query(incidentTimelineSQL, incidentID, limit)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]UnifiedEvent, 0)
+	for rows.Next() {
+		var e UnifiedEvent
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.Type, &e.Title, &e.Summary, &e.Reason, &e.PID, &e.CPUScore, &e.Entropy, &e.Confidence); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+func LogPolicyDryRun(command string, pid int, reason string, confidenceScore float64) error {
+	summary := fmt.Sprintf("Dry-run for %s", command)
+	return logUnifiedEventWithMeta("policy_dry_run", "POLICY_DRY_RUN", summary, reason, "system", uuid.NewString(), pid, 0, 0, confidenceScore)
+}
+
+func logUnifiedEvent(eventType, title, summary, reason string, pid int, cpuScore, entropyScore, confidenceScore float64) error {
+	return logUnifiedEventWithMeta(eventType, title, summary, reason, "system", "", pid, cpuScore, entropyScore, confidenceScore)
+}
+
+func logUnifiedEventWithMeta(eventType, title, summary, reason, actor, incidentID string, pid int, cpuScore, entropyScore, confidenceScore float64) error {
+	_, err := InsertEvent(eventType, actor, reason, currentRunID(), incidentID, title, summary, pid, cpuScore, entropyScore, confidenceScore)
+	return err
+}
+
+func InsertEvent(eventType, actor, reasonText, runID, incidentID, title, summary string, pid int, cpuScore, entropyScore, confidenceScore float64) (string, error) {
+	if db == nil {
+		return "", fmt.Errorf("db not initialized")
+	}
+	stmt, err := db.Prepare(`
+INSERT INTO events(
+	event_id, run_id, incident_id, event_type, actor, reason_text, created_at,
+	timestamp, type, title, summary, reason, pid, cpu_score, entropy_score, confidence_score
+) VALUES(?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)
+`)
+	if err != nil {
+		return "", err
 	}
 	defer stmt.Close()
-	_, err = stmt.Exec(eventType, title, summary, reason, pid, cpuScore, entropyScore, confidenceScore)
-	return err
+
+	if eventType == "" {
+		eventType = "unknown"
+	}
+	if actor == "" {
+		actor = "system"
+	}
+	eventID := uuid.NewString()
+	if runID == "" {
+		runID = "unknown-run"
+	}
+	var incidentIDValue interface{}
+	if incidentID == "" {
+		incidentIDValue = nil
+	} else {
+		incidentIDValue = incidentID
+	}
+
+	_, err = stmt.Exec(
+		eventID,
+		runID,
+		incidentIDValue,
+		eventType,
+		actor,
+		reasonText,
+		eventType,
+		title,
+		summary,
+		reasonText,
+		pid,
+		cpuScore,
+		entropyScore,
+		confidenceScore,
+	)
+	if err != nil {
+		return "", err
+	}
+	return eventID, nil
 }
 
 func parseTimestamp(raw string) time.Time {

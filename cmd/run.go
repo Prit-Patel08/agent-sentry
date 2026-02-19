@@ -7,15 +7,16 @@ import (
 	"flowforge/internal/database"
 	"flowforge/internal/feedback"
 	"flowforge/internal/patterns"
+	"flowforge/internal/policy"
 	"flowforge/internal/redact"
 	"flowforge/internal/state"
+	"flowforge/internal/supervisor"
 	"flowforge/internal/sysmon"
 	"flowforge/internal/tokens"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"os/signal"
 	"regexp"
 	"strings"
 	"sync"
@@ -34,6 +35,7 @@ import (
 var maxCpu float64
 var modelName string
 var noKill bool
+var shadowMode bool
 var injectFeedback string
 var deepWatch bool
 
@@ -67,6 +69,7 @@ func init() {
 	runCmd.Flags().Float64Var(&maxCpu, "max-cpu", 60.0, "Maximum CPU usage threshold (Default: 60.0)")
 	runCmd.Flags().StringVar(&modelName, "model", "gpt-4", "Model name for ROI calculation")
 	runCmd.Flags().BoolVar(&noKill, "no-kill", false, "Watchdog mode: log & alert on loops but don't kill the process")
+	runCmd.Flags().BoolVar(&shadowMode, "shadow-mode", false, "Policy dry-run mode: evaluate actions but log-only for intervention")
 	runCmd.Flags().StringVar(&injectFeedback, "inject-feedback", "", "Path to feedback file to inject into subprocess stdin")
 	runCmd.Flags().BoolVar(&deepWatch, "deep", false, "Enable Deep Watch (syscall monitoring)")
 }
@@ -186,26 +189,6 @@ func NormalizeLog(line string) string {
 	return line
 }
 
-func terminateProcessGroupGracefully(pid int, timeout time.Duration) {
-	if pid <= 0 {
-		return
-	}
-
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
-	_ = syscall.Kill(pid, syscall.SIGTERM)
-
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if err := syscall.Kill(pid, 0); err != nil {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	_ = syscall.Kill(-pid, syscall.SIGKILL)
-	_ = syscall.Kill(pid, syscall.SIGKILL)
-}
-
 func calculateDecisionScores(cpuUsage, threshold float64, lines []string) (cpuScore, entropyScore, confidence float64) {
 	if threshold <= 0 {
 		threshold = 100
@@ -281,7 +264,7 @@ func runProcess(args []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, cmdName, cmdArgs...)
+	cmd := exec.Command(cmdName, cmdArgs...)
 
 	// Initialize LogObserver with profile-based capacity
 	observer := NewLogObserver(logWindow*2, modelName)
@@ -306,15 +289,15 @@ func runProcess(args []string) {
 		}
 	}
 
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	if err := cmd.Start(); err != nil {
+	procSupervisor := supervisor.New(cmd)
+	if err := procSupervisor.Start(); err != nil {
 		fmt.Printf("Failed to start command: %v\n", err)
 		os.Exit(1)
 	}
 
-	pid := cmd.Process.Pid
+	pid := procSupervisor.PID()
 	fmt.Printf("Process started with PID: %d\n", pid)
+	database.SetRunID(agentID)
 
 	var maxObservedCpu float64 = 0.0
 	var lastWatchdogAlert time.Time
@@ -322,6 +305,25 @@ func runProcess(args []string) {
 	var watchdogEscalationLevel int = 0
 	var initialFDs int = 0
 	var flowforgeTerminated atomic.Bool
+	var highCPUStart time.Time
+
+	cpuWindow := time.Duration(viper.GetInt("cpu-window-seconds")) * time.Second
+	if cpuWindow <= 0 {
+		cpuWindow = time.Duration(pollInterval*logWindow) * time.Millisecond
+	}
+	policyDecider := policy.NewThresholdDecider()
+	policyConfig := policy.Policy{
+		MaxCPUPercent:     maxCpu,
+		CPUWindow:         cpuWindow,
+		MinLogEntropy:     0.20,
+		MaxLogRepetition:  0.80,
+		MaxMemoryMB:       viper.GetFloat64("max-memory-mb"),
+		RestartOnBreach:   false,
+		ShadowMode:        shadowMode,
+		DryRunEventType:   "policy_dry_run",
+		DryRunActor:       "system",
+		DryRunEventPrefix: "Policy dry-run",
+	}
 
 	// Create Monitor instance
 	monitor := sysmon.NewMonitor()
@@ -342,7 +344,7 @@ func runProcess(args []string) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+				if procSupervisor.Exited() {
 					return
 				}
 				cpuUsage, err := p.CPUPercent()
@@ -424,164 +426,194 @@ func runProcess(args []string) {
 					}
 				}
 
-				// Loop Detection Logic
 				if cpuUsage > maxCpu {
-					// Check for Semantic Stagnation (Fuzzy)
-					lastLines := observer.GetLastLines(logWindow)
-					if len(lastLines) == logWindow {
-						firstNormalized := NormalizeLog(lastLines[0])
-						isStagnant := true
-						lev := metrics.NewLevenshtein()
+					if highCPUStart.IsZero() {
+						highCPUStart = time.Now()
+					}
+				} else {
+					highCPUStart = time.Time{}
+				}
 
-						for _, line := range lastLines[1:] {
-							currentNormalized := NormalizeLog(line)
-							similarity := strutil.Similarity(firstNormalized, currentNormalized, lev)
+				windowLines := observer.GetLastLines(logWindow)
+				if len(windowLines) == logWindow {
+					firstNormalized := NormalizeLog(windowLines[0])
+					stagnantMatches := 0
+					lev := metrics.NewLevenshtein()
 
-							if similarity < 0.9 { // < 90% similarity means different
-								isStagnant = false
-								break
-							}
-						}
-
-						cpuScore, entropyScore, confidenceScore := calculateDecisionScores(cpuUsage, maxCpu, lastLines)
-						reason := fmt.Sprintf(
-							"CPU %.1f%% exceeded threshold %.1f%% and output entropy %.1f%% indicates repetition",
-							cpuUsage,
-							maxCpu,
-							entropyScore,
-						)
-
-						// Keep decision logs useful without flooding.
-						if time.Since(lastDecisionTrace) > 5*time.Second || isStagnant {
-							_ = database.LogDecisionTrace(fullCommand, pid, cpuScore, entropyScore, confidenceScore, "HIGH_CPU_ANALYSIS", reason)
-							lastDecisionTrace = time.Now()
-						}
-						state.UpdateDecision(reason, cpuScore, entropyScore, confidenceScore)
-
-						if isStagnant {
-							// Sync pattern to blacklist
-							patterns.SyncPatterns(firstNormalized)
-
-							// Generate feedback file
-							feedback.GenerateFeedback(feedback.FeedbackData{
-								Command:    fullCommand,
-								Pattern:    firstNormalized,
-								ExitReason: "LOOP_DETECTED",
-								MaxCPU:     cpuUsage,
-								ModelName:  modelName,
-								Savings:    0, // Will be calculated by DB
-							})
-
-							if noKill {
-								// WATCHDOG MODE: Escalation Logic
-								cooldown := 30 * time.Second
-								if watchdogEscalationLevel == 1 {
-									cooldown = 15 * time.Second
-								} else if watchdogEscalationLevel >= 2 {
-									cooldown = 5 * time.Second
-								}
-
-								if time.Since(lastWatchdogAlert) > cooldown {
-									lastWatchdogAlert = time.Now()
-									watchdogEscalationLevel++
-
-									alertType := "WATCHDOG_ALERT"
-									if watchdogEscalationLevel == 2 {
-										alertType = "WATCHDOG_WARN"
-									} else if watchdogEscalationLevel > 2 {
-										alertType = "WATCHDOG_CRITICAL"
-									}
-
-									fmt.Printf("\n🔍 WATCHDOG [%s]: Loop detected. Escalation Level %d.\n", alertType, watchdogEscalationLevel)
-									fmt.Println("Pattern (Normalized):", firstNormalized)
-									fmt.Printf("[FlowForge] Decision: CPU=%.1f Entropy=%.1f Confidence=%.1f\n", cpuScore, entropyScore, confidenceScore)
-
-									finalTokens := int(observer.TotalTokens())
-									finalCost := tokens.EstimateCost(finalTokens, modelName)
-
-									// Log to DB
-									_ = database.LogIncidentWithDecision(
-										fullCommand,
-										modelName,
-										alertType,
-										cpuUsage,
-										firstNormalized,
-										time.Since(startTime).Seconds(),
-										finalTokens,
-										finalCost,
-										agentID,
-										agentVersion,
-										reason,
-										cpuScore,
-										entropyScore,
-										confidenceScore,
-										"watchdog",
-										0,
-									)
-									_ = database.LogAuditEvent("flowforge", "WATCHDOG_ALERT", reason, "monitor", pid, fullCommand)
-
-									// Broadcast
-									wd, _ := os.Getwd()
-									state.UpdateState(
-										cpuUsage,
-										fmt.Sprintf("WATCHDOG: Loop detected (%s)", alertType),
-										alertType,
-										fullCommand,
-										args,
-										wd,
-										pid,
-									)
-								}
-							} else {
-								// NORMAL MODE: Kill the process
-								fmt.Printf("\n🚨 LOOP DETECTED: Semantic Stagnation (CPU: %.2f%% > %.2f%%)\n", cpuUsage, maxCpu)
-								fmt.Println("Pattern (Normalized):", firstNormalized)
-								fmt.Printf("[FlowForge] Decision: CPU=%.1f Entropy=%.1f Confidence=%.1f\n", cpuScore, entropyScore, confidenceScore)
-
-								finalTokens := int(observer.TotalTokens())
-								finalCost := tokens.EstimateCost(finalTokens, modelName)
-
-								// Log to DB
-								_ = database.LogIncidentWithDecision(
-									fullCommand,
-									modelName,
-									"LOOP_DETECTED",
-									cpuUsage,
-									firstNormalized,
-									time.Since(startTime).Seconds(),
-									finalTokens,
-									finalCost,
-									agentID,
-									agentVersion,
-									reason,
-									cpuScore,
-									entropyScore,
-									confidenceScore,
-									"terminated",
-									0,
-								)
-								_ = database.LogAuditEvent("flowforge", "AUTO_KILL", reason, "monitor", pid, fullCommand)
-
-								// Broadcast Stop
-								wd, _ := os.Getwd()
-								state.UpdateState(
-									cpuUsage,
-									"LOOP DETECTED - Terminating...",
-									"LOOP_DETECTED",
-									fullCommand,
-									args,
-									wd,
-									pid,
-								)
-
-								flowforgeTerminated.Store(true)
-								terminateProcessGroupGracefully(pid, 2*time.Second)
-								cancel()
-								fmt.Println("[FlowForge] Process terminated after high-confidence runaway detection.")
-								return
-							}
+					for _, line := range windowLines[1:] {
+						currentNormalized := NormalizeLog(line)
+						if strutil.Similarity(firstNormalized, currentNormalized, lev) >= 0.9 {
+							stagnantMatches++
 						}
 					}
+
+					repetitionScore := 0.0
+					if logWindow > 1 {
+						repetitionScore = float64(stagnantMatches) / float64(logWindow-1)
+					}
+
+					cpuScore, entropyScore, confidenceScore := calculateDecisionScores(cpuUsage, maxCpu, windowLines)
+					cpuOverFor := time.Duration(0)
+					if !highCPUStart.IsZero() {
+						cpuOverFor = time.Since(highCPUStart)
+					}
+					memMB := 0.0
+					if memInfo, err := p.MemoryInfo(); err == nil {
+						memMB = float64(memInfo.RSS) / 1024.0 / 1024.0
+					}
+
+					decision := policyDecider.Evaluate(policy.Telemetry{
+						CPUPercent:    cpuUsage,
+						CPUOverFor:    cpuOverFor,
+						MemoryMB:      memMB,
+						LogRepetition: repetitionScore,
+						LogEntropy:    entropyScore / 100.0,
+					}, policyConfig)
+					reason := decision.Reason
+
+					if time.Since(lastDecisionTrace) > 5*time.Second || decision.Action != policy.ActionContinue {
+						_ = database.LogDecisionTrace(fullCommand, pid, cpuScore, entropyScore, confidenceScore, decision.Action.String(), reason)
+						lastDecisionTrace = time.Now()
+					}
+					state.UpdateDecision(reason, cpuScore, entropyScore, confidenceScore)
+
+					switch decision.Action {
+					case policy.ActionContinue:
+						// no-op
+					case policy.ActionAlert:
+						// WATCHDOG MODE: Escalation Logic
+						cooldown := 30 * time.Second
+						if watchdogEscalationLevel == 1 {
+							cooldown = 15 * time.Second
+						} else if watchdogEscalationLevel >= 2 {
+							cooldown = 5 * time.Second
+						}
+
+						if time.Since(lastWatchdogAlert) > cooldown {
+							lastWatchdogAlert = time.Now()
+							watchdogEscalationLevel++
+
+							alertType := "WATCHDOG_ALERT"
+							if watchdogEscalationLevel == 2 {
+								alertType = "WATCHDOG_WARN"
+							} else if watchdogEscalationLevel > 2 {
+								alertType = "WATCHDOG_CRITICAL"
+							}
+
+							if repetitionScore >= policyConfig.MaxLogRepetition {
+								patterns.SyncPatterns(firstNormalized)
+							}
+
+							fmt.Printf("\n🔍 WATCHDOG [%s]: Policy alert. Escalation Level %d.\n", alertType, watchdogEscalationLevel)
+							fmt.Println("Pattern (Normalized):", firstNormalized)
+							fmt.Printf("[FlowForge] Decision: CPU=%.1f Entropy=%.1f Confidence=%.1f\n", cpuScore, entropyScore, confidenceScore)
+
+							finalTokens := int(observer.TotalTokens())
+							finalCost := tokens.EstimateCost(finalTokens, modelName)
+
+							_ = database.LogIncidentWithDecision(
+								fullCommand,
+								modelName,
+								alertType,
+								cpuUsage,
+								firstNormalized,
+								time.Since(startTime).Seconds(),
+								finalTokens,
+								finalCost,
+								agentID,
+								agentVersion,
+								reason,
+								cpuScore,
+								entropyScore,
+								confidenceScore,
+								"watchdog",
+								0,
+							)
+							_ = database.LogAuditEvent("flowforge", "WATCHDOG_ALERT", reason, "monitor", pid, fullCommand)
+
+							wd, _ := os.Getwd()
+							state.UpdateState(
+								cpuUsage,
+								fmt.Sprintf("WATCHDOG: Policy alert (%s)", alertType),
+								alertType,
+								fullCommand,
+								args,
+								wd,
+								pid,
+							)
+						}
+					case policy.ActionLogOnly:
+						fmt.Printf("\n[FlowForge] 🧪 %s\n", reason)
+						_ = database.LogPolicyDryRun(fullCommand, pid, reason, confidenceScore)
+					case policy.ActionKill, policy.ActionRestart:
+						if noKill {
+							// Legacy watchdog mode always suppresses destructive actions.
+							fmt.Printf("\n[FlowForge] WATCHDOG MODE: %s\n", reason)
+							_ = database.LogPolicyDryRun(fullCommand, pid, "watchdog mode blocked destructive action: "+reason, confidenceScore)
+							continue
+						}
+
+						patterns.SyncPatterns(firstNormalized)
+						feedback.GenerateFeedback(feedback.FeedbackData{
+							Command:    fullCommand,
+							Pattern:    firstNormalized,
+							ExitReason: "LOOP_DETECTED",
+							MaxCPU:     cpuUsage,
+							ModelName:  modelName,
+							Savings:    0,
+						})
+
+						actionName := "AUTO_KILL"
+						exitReason := "LOOP_DETECTED"
+						if decision.Action == policy.ActionRestart {
+							actionName = "AUTO_RESTART"
+							exitReason = "RESTART_TRIGGERED"
+						}
+
+						fmt.Printf("\n🚨 %s: %s\n", actionName, reason)
+						finalTokens := int(observer.TotalTokens())
+						finalCost := tokens.EstimateCost(finalTokens, modelName)
+
+						_ = database.LogIncidentWithDecision(
+							fullCommand,
+							modelName,
+							exitReason,
+							cpuUsage,
+							firstNormalized,
+							time.Since(startTime).Seconds(),
+							finalTokens,
+							finalCost,
+							agentID,
+							agentVersion,
+							reason,
+							cpuScore,
+							entropyScore,
+							confidenceScore,
+							"terminated",
+							0,
+						)
+						_ = database.LogAuditEvent("flowforge", actionName, reason, "monitor", pid, fullCommand)
+
+						wd, _ := os.Getwd()
+						state.UpdateState(
+							cpuUsage,
+							"POLICY ACTION - Terminating process group...",
+							exitReason,
+							fullCommand,
+							args,
+							wd,
+							pid,
+						)
+
+						flowforgeTerminated.Store(true)
+						_ = procSupervisor.Stop(2 * time.Second)
+						cancel()
+						fmt.Println("[FlowForge] Process group terminated after policy decision.")
+						return
+					}
+				}
+
+				if cpuUsage > maxCpu {
 					fmt.Printf("[FlowForge] WARNING: High CPU (%.2f%%) detected. %s\n", cpuUsage, sysStatsStr)
 				}
 
@@ -600,7 +632,7 @@ func runProcess(args []string) {
 							database.LogIncident(fullCommand, modelName, "SAFETY_LIMIT_EXCEEDED", cpuUsage, fmt.Sprintf("Memory Limit: %.2fMB", memMB), time.Since(startTime).Seconds(), finalTokens, finalCost, agentID, agentVersion)
 
 							flowforgeTerminated.Store(true)
-							terminateProcessGroupGracefully(pid, 2*time.Second)
+							_ = procSupervisor.Stop(2 * time.Second)
 							cancel()
 							return
 						}
@@ -622,7 +654,7 @@ func runProcess(args []string) {
 							database.LogIncident(fullCommand, modelName, "SAFETY_LIMIT_EXCEEDED", cpuUsage, fmt.Sprintf("Token Rate: %.0f/min", rate), time.Since(startTime).Seconds(), finalTokens, finalCost, agentID, agentVersion)
 
 							flowforgeTerminated.Store(true)
-							terminateProcessGroupGracefully(pid, 2*time.Second)
+							_ = procSupervisor.Stop(2 * time.Second)
 							cancel()
 							return
 						}
@@ -632,16 +664,9 @@ func runProcess(args []string) {
 		}
 	}()
 
-	// Signal Handling Goroutine
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-
 	var userTerminated atomic.Bool
-
-	go func() {
-		sig := <-sigChan
-		fmt.Printf("\n[FlowForge] Received signal: %v. Forwarding to subprocess...\n", sig)
+	untrap := procSupervisor.TrapSignals(3*time.Second, func(sig os.Signal) {
+		fmt.Printf("\n[FlowForge] Received signal: %v. Cleaning up process group...\n", sig)
 
 		userTerminated.Store(true)
 		finalTokens := int(observer.TotalTokens())
@@ -649,7 +674,6 @@ func runProcess(args []string) {
 		_ = database.LogIncident(fullCommand, modelName, "USER_TERMINATED", maxObservedCpu, "N/A", time.Since(startTime).Seconds(), finalTokens, finalCost, agentID, agentVersion)
 		_ = database.LogAuditEvent("operator", "TERMINATE", "received OS signal", "cli", pid, fullCommand)
 
-		// Write STOPPED state
 		wd, _ := os.Getwd()
 		state.UpdateState(
 			0,
@@ -660,12 +684,11 @@ func runProcess(args []string) {
 			wd,
 			pid,
 		)
-
-		terminateProcessGroupGracefully(pid, 3*time.Second)
 		cancel()
-	}()
+	}, os.Interrupt, syscall.SIGTERM)
+	defer untrap()
 
-	err := cmd.Wait()
+	err := procSupervisor.Wait()
 	cancel()
 
 	// Write STOPPED state on exit
