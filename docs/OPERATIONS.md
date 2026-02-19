@@ -109,3 +109,18 @@ PILOT_FAIL_ON_MISMATCH=1 ./scripts/week2_real_pilot.sh pilot_commands.txt
 - `pilot_artifacts/.../incidents_snapshot.txt`
 - `pilot_artifacts/.../week2-pilot.db`
 - `pilot_artifacts/.../results.csv` (`exit_reason` and `decision_reason` columns come from DB-correlated incidents)
+
+## Onboarding Usability Verification
+
+Run:
+
+```bash
+./scripts/onboarding_usability_test.sh
+```
+
+Review:
+- `pilot_artifacts/onboarding-<timestamp>/report.md`
+- `pilot_artifacts/onboarding-<timestamp>/logs/`
+
+Procedure for a true new-developer run:
+- `docs/ONBOARDING_USABILITY_TEST.md`

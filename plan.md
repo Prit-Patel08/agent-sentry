@@ -798,6 +798,7 @@ Last updated: 2026-02-19
 - [x] Create one-page feature brief template and enforce in PRs.
 - [x] Publish release checklist and rollback checklist.
 - [ ] Run one end-to-end onboarding usability test with a new developer.
+  Note: scripted onboarding test exists (`./scripts/onboarding_usability_test.sh`) and passed internally on 2026-02-19 (`pilot_artifacts/onboarding-20260219-220513/report.md`); pending external first-time developer run + feedback capture.
 
 ---
 

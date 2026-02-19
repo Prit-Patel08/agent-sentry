@@ -201,12 +201,24 @@ npm run build
 - run daily soak check: `./scripts/week2_soak_check.sh pilot_commands.txt`
 - run release checkpoint again before tagging
 
+## Onboarding Usability Test
+
+Run end-to-end onboarding verification:
+
+```bash
+./scripts/onboarding_usability_test.sh
+```
+
+Report output:
+- `pilot_artifacts/onboarding-<timestamp>/report.md`
+
 ## Docs
 
 - operations: `docs/OPERATIONS.md`
 - branch protection: `docs/BRANCH_PROTECTION.md`
 - threat model: `docs/THREAT_MODEL.md`
 - runbook: `docs/RUNBOOK.md`
+- onboarding usability test: `docs/ONBOARDING_USABILITY_TEST.md`
 - week 1 checklist: `docs/WEEK1_PILOT.md`
 - week 2 baseline: `docs/WEEK2_BASELINE.md`
 - week 2 soak: `docs/WEEK2_SOAK.md`
