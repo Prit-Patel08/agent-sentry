@@ -141,12 +141,12 @@ func (s *Supervisor) stopInternal(grace time.Duration) error {
 	}
 
 	termErr := signalGroup(pid, syscall.SIGTERM)
-	if waitWithTimeout(s.waitCh, grace) {
+	if waitForGroupExit(pid, grace) {
 		return nil
 	}
 
 	killErr := signalGroup(pid, syscall.SIGKILL)
-	if !waitWithTimeout(s.waitCh, 2*time.Second) {
+	if !waitForGroupExit(pid, 2*time.Second) {
 		return fmt.Errorf("supervisor: process group %d did not exit after SIGKILL", pid)
 	}
 
@@ -194,4 +194,27 @@ func signalGroup(pid int, sig syscall.Signal) error {
 	}
 
 	return procErr
+}
+
+func waitForGroupExit(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !processGroupExists(pid) {
+			return true
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return !processGroupExists(pid)
+}
+
+func processGroupExists(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(-pid, 0)
+	if err == nil {
+		return true
+	}
+	// EPERM means the process group exists but is not signalable.
+	return errors.Is(err, syscall.EPERM)
 }

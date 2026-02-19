@@ -45,7 +45,7 @@ func TestStopTerminatesProcessTree(t *testing.T) {
 		t.Fatalf("stop: %v", err)
 	}
 
-	if processExists(childPID) {
+	if !waitForProcessExit(childPID, 2*time.Second) {
 		t.Fatalf("child process %d is still running after stop", childPID)
 	}
 }
@@ -80,8 +80,7 @@ func TestTrapSignalsStopsProcess(t *testing.T) {
 		t.Fatalf("send signal: %v", err)
 	}
 
-	time.Sleep(400 * time.Millisecond)
-	if processExists(pid) {
+	if !waitForProcessExit(pid, 2*time.Second) {
 		t.Fatalf("process %d still running after trapped signal cleanup", pid)
 	}
 }
@@ -92,4 +91,15 @@ func processExists(pid int) bool {
 	}
 	err := syscall.Kill(pid, 0)
 	return err == nil
+}
+
+func waitForProcessExit(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !processExists(pid) {
+			return true
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return !processExists(pid)
 }
