@@ -72,6 +72,15 @@ Notes:
 ./scripts/release_checkpoint.sh
 ```
 
+## Release and Rollback Checklists
+
+- Release procedure: `docs/RELEASE_CHECKLIST.md`
+- Rollback procedure: `docs/ROLLBACK_CHECKLIST.md`
+
+Before tagging, complete:
+- release checklist
+- release checkpoint (`./scripts/release_checkpoint.sh`)
+
 ## Week 2 Real-Workload Pilot
 
 1. Copy and edit command list:

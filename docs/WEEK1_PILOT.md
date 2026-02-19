@@ -68,4 +68,4 @@ Pass criteria:
 - strict local verification gate passes (`./scripts/verify_local.sh --strict`)
 - no tracked secret/runtime artifacts
 - no legacy naming
-- runbook and pilot docs present
+- runbook/pilot/release/rollback docs present

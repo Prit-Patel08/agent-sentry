@@ -210,4 +210,6 @@ npm run build
 - week 1 checklist: `docs/WEEK1_PILOT.md`
 - week 2 baseline: `docs/WEEK2_BASELINE.md`
 - week 2 soak: `docs/WEEK2_SOAK.md`
+- release checklist: `docs/RELEASE_CHECKLIST.md`
+- rollback checklist: `docs/ROLLBACK_CHECKLIST.md`
 - security policy: `SECURITY.md`

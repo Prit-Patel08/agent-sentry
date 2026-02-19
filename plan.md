@@ -796,8 +796,7 @@ Last updated: 2026-02-19
 - [x] Finalize README rewrite aligned to this plan.
 - [x] Define and implement benchmark fixture set.
 - [x] Create one-page feature brief template and enforce in PRs.
-- [ ] Publish release checklist and rollback checklist.
-  Note: release checkpoint exists; explicit rollback checklist document still pending.
+- [x] Publish release checklist and rollback checklist.
 - [ ] Run one end-to-end onboarding usability test with a new developer.
 
 ---

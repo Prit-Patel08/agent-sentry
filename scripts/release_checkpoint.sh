@@ -28,8 +28,25 @@ if rg -n -i --hidden "quenvor|agent-sentry " -g '!.git/*' -g '!scripts/release_c
   exit 1
 fi
 
-if [[ ! -f "docs/RUNBOOK.md" || ! -f "docs/WEEK1_PILOT.md" ]]; then
-  echo "Blocked: runbook or pilot docs missing." >&2
+required_docs=(
+  "docs/RUNBOOK.md"
+  "docs/WEEK1_PILOT.md"
+  "docs/RELEASE_CHECKLIST.md"
+  "docs/ROLLBACK_CHECKLIST.md"
+)
+
+missing_docs=()
+for doc in "${required_docs[@]}"; do
+  if [[ ! -f "$doc" ]]; then
+    missing_docs+=("$doc")
+  fi
+done
+
+if (( ${#missing_docs[@]} > 0 )); then
+  echo "Blocked: required operator docs missing:" >&2
+  for doc in "${missing_docs[@]}"; do
+    echo "  - $doc" >&2
+  done
   exit 1
 fi
 
@@ -43,7 +60,7 @@ Date: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 - Local verification gate: PASS
 - Tracked secret/runtime legacy artifacts: PASS
 - Legacy naming scan: PASS
-- Operator docs present: PASS
+- Operator docs present (runbook/pilot/release/rollback): PASS
 
 ## Ready
 
