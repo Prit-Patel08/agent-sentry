@@ -24,6 +24,7 @@ This runs:
 
 - `pilot_artifacts/soak-<run-id>/summary.md`
 - `pilot_artifacts/soak-<run-id>/real-pilot/summary.md`
+- `pilot_artifacts/soak-<run-id>/real-pilot/week2-pilot.db`
 - `pilot_artifacts/soak-<run-id>/release-checkpoint/checkpoint.md`
 
 ## Promotion Rule

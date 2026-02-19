@@ -71,6 +71,7 @@ cp scripts/pilot_commands.example.txt pilot_commands.txt
 ```
 
 2. Replace commands with your real workloads.
+  - quoted arguments are supported in `pilot_commands.txt` (shell-style quoting).
 
 3. Run pilot:
 
@@ -81,3 +82,5 @@ cp scripts/pilot_commands.example.txt pilot_commands.txt
 4. Review:
 - `pilot_artifacts/.../summary.md`
 - `pilot_artifacts/.../incidents_snapshot.txt`
+- `pilot_artifacts/.../week2-pilot.db`
+- `pilot_artifacts/.../results.csv` (`exit_reason` and `decision_reason` columns come from DB-correlated incidents)
