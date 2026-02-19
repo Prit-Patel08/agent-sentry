@@ -121,42 +121,44 @@ echo "Building backend..."
 go mod download
 go build -o flowforge .
 
-echo "Building dashboard (production)..."
+echo "Ensuring dashboard dependencies..."
 pushd dashboard >/dev/null
-npm ci
-npm run build
+if [[ ! -d "node_modules" ]]; then
+  npm ci
+fi
 popd >/dev/null
 
 if command -v lsof >/dev/null 2>&1; then
+  echo "🧹 Clearing ports ${API_PORT} and ${DASHBOARD_PORT}..."
   lsof -t -i :"${API_PORT}" -i :"${DASHBOARD_PORT}" | xargs kill -9 2>/dev/null || true
 fi
 
-if [[ "$RUN_DEMO" == "1" ]]; then
-  echo "Running 60-second value demo..."
-  ./flowforge demo || true
-fi
-
 cleanup() {
+  echo "Stopping services..."
   pkill -f "./flowforge dashboard" 2>/dev/null || true
-  pkill -f "next start -p ${DASHBOARD_PORT}" 2>/dev/null || true
+  pkill -f "next" 2>/dev/null || true
 }
 trap cleanup EXIT
 
+echo "🚀 Starting services..."
+
 echo "Starting API..."
 ./flowforge dashboard &
-sleep 1
+sleep 2
 
-echo "Starting dashboard server..."
+echo "Starting dashboard (Development Mode)..."
 (
   cd dashboard
-  NEXT_PUBLIC_FLOWFORGE_API_BASE="http://localhost:${API_PORT}" npm run start -- -p "${DASHBOARD_PORT}"
+  NEXT_PUBLIC_FLOWFORGE_API_BASE="http://localhost:${API_PORT}" npm run dev -- -p "${DASHBOARD_PORT}"
 ) &
 
-echo "API:       http://localhost:${API_PORT}/healthz"
-echo "Dashboard: http://localhost:${DASHBOARD_PORT}"
-echo "Metrics:   http://localhost:${API_PORT}/metrics"
+echo "------------------------------------------------"
+echo "✅ API:       http://localhost:${API_PORT}/healthz"
+echo "✅ Dashboard: http://localhost:${DASHBOARD_PORT}"
+echo "------------------------------------------------"
 
 if [[ "$OPEN_BROWSER" == "1" ]]; then
+  sleep 3
   if command -v open >/dev/null 2>&1; then
     open "http://localhost:${DASHBOARD_PORT}" || true
   elif command -v xdg-open >/dev/null 2>&1; then
@@ -164,4 +166,11 @@ if [[ "$OPEN_BROWSER" == "1" ]]; then
   fi
 fi
 
+if [[ "$RUN_DEMO" == "1" ]]; then
+  echo "🎬 Running product demo in 5 seconds..."
+  sleep 5
+  ./flowforge demo || true
+fi
+
+echo "Services are running. Press Ctrl+C to stop."
 wait
