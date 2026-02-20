@@ -37,6 +37,8 @@ var maxCpu float64
 var modelName string
 var noKill bool
 var shadowMode bool
+var policyRollout string
+var policyCanaryPercent int
 var injectFeedback string
 var deepWatch bool
 var firstNumberRegex = regexp.MustCompile(`\d+`)
@@ -72,6 +74,8 @@ func init() {
 	runCmd.Flags().StringVar(&modelName, "model", "gpt-4", "Model name for ROI calculation")
 	runCmd.Flags().BoolVar(&noKill, "no-kill", false, "Watchdog mode: log & alert on loops but don't kill the process")
 	runCmd.Flags().BoolVar(&shadowMode, "shadow-mode", false, "Policy dry-run mode: evaluate actions but log-only for intervention")
+	runCmd.Flags().StringVar(&policyRollout, "policy-rollout", "", "Policy rollout mode: shadow, canary, enforce (default: enforce; shadow-mode remains backward-compatible)")
+	runCmd.Flags().IntVar(&policyCanaryPercent, "policy-canary-percent", -1, "Policy canary enforcement percentage (0-100). In canary mode, unsampled runs are log-only")
 	runCmd.Flags().StringVar(&injectFeedback, "inject-feedback", "", "Path to feedback file to inject into subprocess stdin")
 	runCmd.Flags().BoolVar(&deepWatch, "deep", false, "Enable Deep Watch (syscall monitoring)")
 }
@@ -314,6 +318,50 @@ func detectProgressLikeOutput(lines []string) bool {
 	return progressHintRatio >= 0.40 && numericCoverage >= 0.70 && increaseRatio >= 0.70
 }
 
+func resolvePolicyRolloutConfig() (policy.RolloutMode, int) {
+	mode := strings.ToLower(strings.TrimSpace(policyRollout))
+	if mode == "" {
+		mode = strings.ToLower(strings.TrimSpace(viper.GetString("policy-rollout")))
+	}
+
+	switch mode {
+	case string(policy.RolloutShadow), string(policy.RolloutCanary), string(policy.RolloutEnforce):
+		// valid
+	case "":
+		if shadowMode {
+			mode = string(policy.RolloutShadow)
+		} else {
+			mode = string(policy.RolloutEnforce)
+		}
+	default:
+		mode = string(policy.RolloutEnforce)
+	}
+
+	// Backward compatibility: old --shadow-mode still forces shadow unless rollout is explicitly non-enforce.
+	if shadowMode && mode == string(policy.RolloutEnforce) {
+		mode = string(policy.RolloutShadow)
+	}
+
+	canaryPercent := policyCanaryPercent
+	if canaryPercent < 0 {
+		if viper.IsSet("policy-canary-percent") {
+			canaryPercent = viper.GetInt("policy-canary-percent")
+		} else if mode == string(policy.RolloutCanary) {
+			canaryPercent = 10
+		} else {
+			canaryPercent = 0
+		}
+	}
+	if canaryPercent < 0 {
+		canaryPercent = 0
+	}
+	if canaryPercent > 100 {
+		canaryPercent = 100
+	}
+
+	return policy.RolloutMode(mode), canaryPercent
+}
+
 func runProcess(args []string) {
 	if err := database.InitDB(); err != nil {
 		fmt.Printf("Warning: Failed to initialize database: %v\n", err)
@@ -342,14 +390,15 @@ func runProcess(args []string) {
 	if logWindow <= 0 {
 		logWindow = 10
 	}
+	rolloutMode, canaryPercent := resolvePolicyRolloutConfig()
 
 	// Generate transient Agent ID for this run
 	agentID := uuid.New().String()
 	agentVersion := "1.0.0"
 	fmt.Printf("[FlowForge] 🆔 Agent ID: %s (v%s)\n", agentID, agentVersion)
 
-	fmt.Printf("[FlowForge] Config: max-cpu=%.1f%%, poll-interval=%dms, log-window=%d, no-kill=%v\n",
-		maxCpu, pollInterval, logWindow, noKill)
+	fmt.Printf("[FlowForge] Config: max-cpu=%.1f%%, poll-interval=%dms, log-window=%d, no-kill=%v, policy-rollout=%s, policy-canary=%d%%\n",
+		maxCpu, pollInterval, logWindow, noKill, rolloutMode, canaryPercent)
 
 	// Create a context that can be cancelled
 	ctx, cancel := context.WithCancel(context.Background())
@@ -411,6 +460,8 @@ func runProcess(args []string) {
 		MaxMemoryMB:       viper.GetFloat64("max-memory-mb"),
 		RestartOnBreach:   false,
 		ShadowMode:        shadowMode,
+		RolloutMode:       rolloutMode,
+		CanaryPercent:     canaryPercent,
 		DryRunEventType:   "policy_dry_run",
 		DryRunActor:       "system",
 		DryRunEventPrefix: "Policy dry-run",
@@ -549,6 +600,7 @@ func runProcess(args []string) {
 						LogEntropy:    entropyScore / 100.0,
 						RawDiversity:  rawDiversity,
 						ProgressLike:  progressLike,
+						RolloutKey:    agentID,
 					}, policyConfig)
 					reason := decision.Reason
 

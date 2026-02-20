@@ -2,6 +2,7 @@ package policy
 
 import (
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"time"
 )
@@ -41,7 +42,16 @@ type Telemetry struct {
 	LogEntropy    float64 // 0..1 where 0 means repetitive
 	RawDiversity  float64 // 0..1 where 1 means highly diverse raw lines
 	ProgressLike  bool    // true when output suggests forward progress, not stagnation
+	RolloutKey    string  // Stable key for deterministic canary sampling
 }
+
+type RolloutMode string
+
+const (
+	RolloutEnforce RolloutMode = "enforce"
+	RolloutCanary  RolloutMode = "canary"
+	RolloutShadow  RolloutMode = "shadow"
+)
 
 type Policy struct {
 	MaxCPUPercent    float64
@@ -51,6 +61,8 @@ type Policy struct {
 	MinLogEntropy    float64
 	RestartOnBreach  bool
 	ShadowMode       bool
+	RolloutMode      RolloutMode
+	CanaryPercent    int // 0..100: percent of sampled runs where destructive action is enforced in canary mode
 
 	// Metadata fields used by callers when recording shadow-mode evidence.
 	DryRunEventType   string
@@ -127,11 +139,29 @@ func (ThresholdDecider) Evaluate(t Telemetry, p Policy) Decision {
 	}
 
 	reason := strings.Join(reasons, " AND ")
-	if p.ShadowMode && (action == ActionKill || action == ActionRestart) {
-		return Decision{
-			Action:         ActionLogOnly,
-			IntendedAction: action,
-			Reason:         fmt.Sprintf("Shadow mode: would %s. %s", action.String(), reason),
+	if action == ActionKill || action == ActionRestart {
+		switch normalizeRolloutMode(p.RolloutMode, p.ShadowMode) {
+		case RolloutShadow:
+			return Decision{
+				Action:         ActionLogOnly,
+				IntendedAction: action,
+				Reason:         fmt.Sprintf("Shadow mode: would %s. %s", action.String(), reason),
+			}
+		case RolloutCanary:
+			percent := clampCanaryPercent(p.CanaryPercent)
+			enforce, bucket := canaryEnforces(t.RolloutKey, percent)
+			if !enforce {
+				return Decision{
+					Action:         ActionLogOnly,
+					IntendedAction: action,
+					Reason:         fmt.Sprintf("Canary mode: log-only (%d%%, bucket=%d) would %s. %s", percent, bucket, action.String(), reason),
+				}
+			}
+			return Decision{
+				Action:         action,
+				IntendedAction: action,
+				Reason:         fmt.Sprintf("Canary mode: enforce (%d%%, bucket=%d). %s", percent, bucket, reason),
+			}
 		}
 	}
 
@@ -140,4 +170,42 @@ func (ThresholdDecider) Evaluate(t Telemetry, p Policy) Decision {
 		IntendedAction: action,
 		Reason:         reason,
 	}
+}
+
+func normalizeRolloutMode(mode RolloutMode, shadowMode bool) RolloutMode {
+	switch RolloutMode(strings.ToLower(strings.TrimSpace(string(mode)))) {
+	case RolloutEnforce, RolloutCanary, RolloutShadow:
+		return RolloutMode(strings.ToLower(strings.TrimSpace(string(mode))))
+	default:
+		if shadowMode {
+			return RolloutShadow
+		}
+		return RolloutEnforce
+	}
+}
+
+func clampCanaryPercent(percent int) int {
+	if percent < 0 {
+		return 0
+	}
+	if percent > 100 {
+		return 100
+	}
+	return percent
+}
+
+func canaryBucket(key string) int {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		key = "default-rollout-key"
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	return int(h.Sum32() % 100)
+}
+
+func canaryEnforces(key string, percent int) (bool, int) {
+	p := clampCanaryPercent(percent)
+	bucket := canaryBucket(key)
+	return bucket < p, bucket
 }

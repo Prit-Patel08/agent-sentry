@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -14,6 +15,17 @@ func validateConfig() error {
 		return err
 	}
 	if err := validateIntRange("log-window", 2, 10000); err != nil {
+		return err
+	}
+	if viper.IsSet("policy-rollout") {
+		rollout := strings.ToLower(strings.TrimSpace(viper.GetString("policy-rollout")))
+		switch rollout {
+		case "shadow", "canary", "enforce":
+		default:
+			return fmt.Errorf("invalid config: policy-rollout must be one of shadow|canary|enforce")
+		}
+	}
+	if err := validateIntRange("policy-canary-percent", 0, 100); err != nil {
 		return err
 	}
 

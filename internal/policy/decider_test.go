@@ -129,3 +129,81 @@ func TestEvaluateProgressGuardSuppressesDestructiveAction(t *testing.T) {
 		t.Fatalf("unexpected reason\nexpected: %q\ngot:      %q", expected, out.Reason)
 	}
 }
+
+func TestEvaluateCanaryModeReturnsLogOnlyOutsideSample(t *testing.T) {
+	d := NewThresholdDecider()
+	key := "run-canary-log-only"
+	bucket := canaryBucket(key)
+	percent := bucket
+
+	p := Policy{
+		MaxCPUPercent:   90,
+		CPUWindow:       30 * time.Second,
+		MinLogEntropy:   0.20,
+		RestartOnBreach: false,
+		RolloutMode:     RolloutCanary,
+		CanaryPercent:   percent,
+	}
+
+	out := d.Evaluate(Telemetry{
+		CPUPercent: 95,
+		CPUOverFor: 45 * time.Second,
+		LogEntropy: 0.15,
+		RolloutKey: key,
+	}, p)
+
+	if out.Action != ActionLogOnly {
+		t.Fatalf("expected ActionLogOnly, got %s", out.Action.String())
+	}
+	if out.IntendedAction != ActionKill {
+		t.Fatalf("expected intended action KILL, got %s", out.IntendedAction.String())
+	}
+	if expected := "Canary mode: log-only"; len(out.Reason) < len(expected) || out.Reason[:len(expected)] != expected {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+}
+
+func TestEvaluateCanaryModeEnforcesInsideSample(t *testing.T) {
+	d := NewThresholdDecider()
+	key := "run-canary-enforce"
+	bucket := canaryBucket(key)
+	percent := bucket + 1
+	if percent > 100 {
+		percent = 100
+	}
+
+	p := Policy{
+		MaxCPUPercent:   90,
+		CPUWindow:       30 * time.Second,
+		MinLogEntropy:   0.20,
+		RestartOnBreach: false,
+		RolloutMode:     RolloutCanary,
+		CanaryPercent:   percent,
+	}
+
+	out := d.Evaluate(Telemetry{
+		CPUPercent: 95,
+		CPUOverFor: 45 * time.Second,
+		LogEntropy: 0.15,
+		RolloutKey: key,
+	}, p)
+
+	if out.Action != ActionKill {
+		t.Fatalf("expected ActionKill, got %s", out.Action.String())
+	}
+	if out.IntendedAction != ActionKill {
+		t.Fatalf("expected intended action KILL, got %s", out.IntendedAction.String())
+	}
+	if expected := "Canary mode: enforce"; len(out.Reason) < len(expected) || out.Reason[:len(expected)] != expected {
+		t.Fatalf("unexpected reason: %q", out.Reason)
+	}
+}
+
+func TestCanarySamplingDeterministicByKey(t *testing.T) {
+	key := "run-deterministic"
+	b1 := canaryBucket(key)
+	b2 := canaryBucket(key)
+	if b1 != b2 {
+		t.Fatalf("expected deterministic bucket, got %d and %d", b1, b2)
+	}
+}

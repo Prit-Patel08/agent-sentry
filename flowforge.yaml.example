@@ -1,5 +1,7 @@
 # FlowForge baseline profile
 profile: standard
+policy-rollout: enforce
+policy-canary-percent: 10
 
 profiles:
   light:

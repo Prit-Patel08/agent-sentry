@@ -41,6 +41,12 @@ Run policy in dry-run mode (evaluate and log only):
 ./flowforge run --shadow-mode -- python3 your_script.py
 ```
 
+Run policy in canary mode (sampled destructive enforcement):
+
+```bash
+./flowforge run --policy-rollout canary --policy-canary-percent 10 -- python3 your_script.py
+```
+
 Run demo again:
 
 ```bash

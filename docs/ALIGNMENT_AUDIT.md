@@ -8,7 +8,6 @@ Scope: verify alignment against the 10-domain infrastructure company blueprint.
 Current direction is broadly aligned with your blueprint for domains 1, 2, 3, 4, 8, and 9 foundations.
 
 Main gaps are in:
-- policy canary lifecycle
 - formal SLO/error-budget operations
 - integration productization (domain 10)
 - cost intelligence (domain 6)
@@ -24,7 +23,7 @@ Main gaps are in:
 
 3. Domain 3 (Policy and Governance)
 - policy dry-run/shadow mode exists.
-- policy controls are present but still early.
+- policy rollout states (`shadow -> canary -> enforce`) are implemented in runtime policy evaluation.
 
 4. Domain 4 (Evidence and Audit)
 - append-only events baseline exists with timeline query support.
@@ -46,11 +45,7 @@ Main gaps are in:
 - reason outputs exist, but formal `engine_version` contract is not yet first-class.
 - action: add decision engine metadata contract in schema and API payloads.
 
-2. Policy lifecycle governance
-- shadow mode exists; canary rollout and approval workflow are still planned.
-- action: add policy rollout states and policy-change gates.
-
-3. SLO ritual maturity
+2. SLO ritual maturity
 - checks exist technically, but reliability governance rituals are not fully formalized.
 - action: add weekly SLO dashboard + error budget policy doc + owner cadence.
 
@@ -71,9 +66,8 @@ Main gaps are in:
 
 ## Alignment Plan (Short-Term)
 
-1. Implement policy canary workflow (shadow -> canary -> enforce).
-2. Formalize SLO and error-budget operating ritual.
-3. Run first chaos drill and publish findings.
+1. Formalize SLO and error-budget operating ritual.
+2. Run first chaos drill and publish findings.
 
 ## Alignment Rule Going Forward
 

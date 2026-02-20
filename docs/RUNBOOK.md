@@ -104,7 +104,23 @@ Choose a threshold where:
 - runaway profiles are terminated
 - bursty/healthy profiles are not terminated
 
-## 8. What FlowForge Does Not Do
+## 8. Policy Rollout States
+
+Use policy rollout to introduce destructive actions safely:
+
+- `shadow`: evaluate policy but always log-only for kill/restart.
+- `canary`: enforce kill/restart for sampled runs only (`policy-canary-percent`), log-only otherwise.
+- `enforce`: full policy enforcement.
+
+Examples:
+
+```bash
+./flowforge run --shadow-mode -- python3 your_worker.py
+./flowforge run --policy-rollout canary --policy-canary-percent 10 -- python3 your_worker.py
+./flowforge run --policy-rollout enforce -- python3 your_worker.py
+```
+
+## 9. What FlowForge Does Not Do
 
 - It does not sandbox untrusted code.
 - It does not replace OS/container isolation.
