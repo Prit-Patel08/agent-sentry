@@ -20,6 +20,7 @@ flowforge_report_*.md
 logs/
 pilot_artifacts/
 ci_artifacts/
+trigger.txt
 
 # Go
 vendor/
