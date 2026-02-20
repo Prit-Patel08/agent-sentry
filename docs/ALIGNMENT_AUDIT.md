@@ -62,6 +62,8 @@ Main gaps are in:
 
 1. `trigger.txt` was removed from the repository.
 2. `trigger.txt` was added to `.gitignore` to avoid accidental reintroduction.
+3. `FLOWFORGE_DOCS.md` was removed (redundant/unreferenced top-level doc dump).
+4. `demo/stuck.py` was removed (unused duplicate of root `stuck.py` demo script).
 
 ## What We Intentionally Did Not Remove
 
