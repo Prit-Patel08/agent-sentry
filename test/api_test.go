@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"syscall"
 	"testing"
 
 	"flowforge/internal/api"
 	"flowforge/internal/database"
+	"flowforge/internal/state"
 )
 
 func stringValue(v interface{}) string {
@@ -198,6 +200,51 @@ func TestKillEndpointNoKeySetIsBlocked(t *testing.T) {
 	// Should be 403 Forbidden when no key is set (Mutations blocked for security)
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("Expected 403 Forbidden when FLOWFORGE_API_KEY is not set, but got %d", resp.StatusCode)
+	}
+}
+
+func TestRestartEndpointUpdatesRuntimeState(t *testing.T) {
+	os.Setenv("FLOWFORGE_API_KEY", "test-secret-key-12345")
+	defer os.Unsetenv("FLOWFORGE_API_KEY")
+
+	restartArgs := []string{"/bin/sh", "-c", "sleep 15"}
+	state.UpdateState(0, "", "STOPPED", "/bin/sh -c sleep 15", restartArgs, "", 0)
+
+	req := httptest.NewRequest("POST", "/process/restart", nil)
+	req.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	w := httptest.NewRecorder()
+	api.HandleProcessRestart(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	pid := intValue(body["pid"])
+	if pid <= 0 {
+		t.Fatalf("expected response pid > 0, got %d", pid)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	})
+
+	st := state.GetState()
+	if st.Status != "RUNNING" {
+		t.Fatalf("expected state status RUNNING, got %q", st.Status)
+	}
+	if st.PID != pid {
+		t.Fatalf("expected state pid %d, got %d", pid, st.PID)
+	}
+	if !reflect.DeepEqual(st.Args, restartArgs) {
+		t.Fatalf("expected args %v, got %v", restartArgs, st.Args)
+	}
+	if st.Command != "/bin/sh -c sleep 15" {
+		t.Fatalf("expected command to be preserved, got %q", st.Command)
 	}
 }
 

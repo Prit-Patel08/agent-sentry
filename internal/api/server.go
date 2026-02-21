@@ -427,22 +427,27 @@ func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if stats.Status != "STOPPED" && stats.PID > 0 {
-		_ = syscall.Kill(-stats.PID, syscall.SIGKILL)
+		if err := syscall.Kill(-stats.PID, syscall.SIGKILL); err != nil {
+			_ = syscall.Kill(stats.PID, syscall.SIGKILL)
+		}
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	go func() {
-		cmd := exec.Command(stats.Args[0], stats.Args[1:]...)
-		if stats.Dir != "" {
-			cmd.Dir = stats.Dir
-		}
-		fmt.Printf("[API] Secure restart: %v\n", stats.Args)
-		if err := cmd.Start(); err != nil {
-			fmt.Printf("[API] Failed to restart command: %v\n", err)
-			return
-		}
-		fmt.Printf("[API] Restarted process with PID: %d\n", cmd.Process.Pid)
-	}()
+	cmd := exec.Command(stats.Args[0], stats.Args[1:]...)
+	if stats.Dir != "" {
+		cmd.Dir = stats.Dir
+	}
+	// Place restarted processes in their own group so kill actions can
+	// target the full subtree deterministically.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	fmt.Printf("[API] Secure restart: %v\n", stats.Args)
+	if err := cmd.Start(); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"Failed to restart command: %v"}`, err), http.StatusInternalServerError)
+		return
+	}
+	newPID := cmd.Process.Pid
+	fmt.Printf("[API] Restarted process with PID: %d\n", newPID)
+	state.UpdateState(0, "", "RUNNING", stats.Command, stats.Args, stats.Dir, newPID)
 
 	apiMetrics.IncProcessRestart()
 	reason := mutationReason(r)
@@ -450,9 +455,9 @@ func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 		reason = "manual API restart request"
 	}
 	incidentID := uuid.NewString()
-	_ = database.LogAuditEventWithIncident(actorFromRequest(r), "RESTART", reason, "api", stats.PID, stats.Command, incidentID)
+	_ = database.LogAuditEventWithIncident(actorFromRequest(r), "RESTART", reason, "api", newPID, stats.Command, incidentID)
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"status":"restarting","command":"%s"}`, stats.Command)
+	fmt.Fprintf(w, `{"status":"restarting","command":"%s","pid":%d}`, stats.Command, newPID)
 }
 
 func actorFromRequest(r *http.Request) string {

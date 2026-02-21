@@ -65,6 +65,9 @@ curl -X POST \
   http://127.0.0.1:8080/process/restart
 ```
 
+Expected response shape:
+`{"status":"restarting","command":"<command>","pid":12345}`
+
 ```bash
 curl -X POST \
   -H "Authorization: Bearer $FLOWFORGE_API_KEY" \
