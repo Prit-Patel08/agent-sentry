@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -143,5 +144,80 @@ func TestGetAllIncidentsFromUnifiedEventsWhenLegacyRowsDeleted(t *testing.T) {
 	}
 	if incidents[0].Command != "python3 demo/runaway.py" {
 		t.Fatalf("unexpected command: %q", incidents[0].Command)
+	}
+}
+
+func TestInitDBMigratesLegacyEventsWithoutCreatedAt(t *testing.T) {
+	dbPath := withTempDBPath(t)
+	CloseDB()
+
+	legacyDB, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+
+	const legacyEventsSchema = `CREATE TABLE IF NOT EXISTS events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		type TEXT NOT NULL,
+		title TEXT NOT NULL,
+		summary TEXT DEFAULT '',
+		reason TEXT DEFAULT '',
+		pid INTEGER DEFAULT 0,
+		cpu_score REAL DEFAULT 0.0,
+		entropy_score REAL DEFAULT 0.0,
+		confidence_score REAL DEFAULT 0.0,
+		event_id TEXT,
+		run_id TEXT DEFAULT 'unknown-run',
+		incident_id TEXT,
+		event_type TEXT DEFAULT 'legacy',
+		actor TEXT DEFAULT 'system',
+		reason_text TEXT DEFAULT ''
+	);`
+	if _, err := legacyDB.Exec(legacyEventsSchema); err != nil {
+		t.Fatalf("create legacy events schema: %v", err)
+	}
+	if _, err := legacyDB.Exec(`INSERT INTO events(type, title, summary) VALUES ('legacy', 'legacy-row', 'legacy')`); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	if err := InitDB(); err != nil {
+		t.Fatalf("InitDB should migrate legacy events schema without created_at: %v", err)
+	}
+
+	hasCreatedAt, err := columnExists("events", "created_at")
+	if err != nil {
+		t.Fatalf("columnExists(events, created_at): %v", err)
+	}
+	if !hasCreatedAt {
+		t.Fatalf("expected created_at column to be added")
+	}
+
+	indexes := map[string]bool{}
+	rows, err := GetDB().Query("PRAGMA index_list('events')")
+	if err != nil {
+		t.Fatalf("PRAGMA index_list(events): %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			seq     int
+			name    string
+			unique  int
+			origin  string
+			partial int
+		)
+		if err := rows.Scan(&seq, &name, &unique, &origin, &partial); err != nil {
+			t.Fatalf("scan index list: %v", err)
+		}
+		indexes[name] = true
+	}
+	for _, idx := range []string{"idx_events_event_id", "idx_events_incident_created", "idx_events_run_created", "idx_events_type_created"} {
+		if !indexes[idx] {
+			t.Fatalf("expected index %s to exist after migration", idx)
+		}
 	}
 }

@@ -235,14 +235,32 @@ func InitDB() error {
 	}
 
 	// Events table migrations for older installs.
-	db.Exec("ALTER TABLE events ADD COLUMN event_id TEXT;")
-	db.Exec("ALTER TABLE events ADD COLUMN run_id TEXT DEFAULT 'unknown-run';")
-	db.Exec("ALTER TABLE events ADD COLUMN incident_id TEXT;")
-	db.Exec("ALTER TABLE events ADD COLUMN event_type TEXT DEFAULT 'legacy';")
-	db.Exec("ALTER TABLE events ADD COLUMN actor TEXT DEFAULT 'system';")
-	db.Exec("ALTER TABLE events ADD COLUMN reason_text TEXT DEFAULT '';")
-	db.Exec("ALTER TABLE events ADD COLUMN payload_json TEXT DEFAULT '{}';")
-	db.Exec("ALTER TABLE events ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP;")
+	if err := ensureColumnExists("events", "event_id", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists("events", "run_id", "TEXT DEFAULT 'unknown-run'"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists("events", "incident_id", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists("events", "event_type", "TEXT DEFAULT 'legacy'"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists("events", "actor", "TEXT DEFAULT 'system'"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists("events", "reason_text", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists("events", "payload_json", "TEXT DEFAULT '{}'"); err != nil {
+		return err
+	}
+	// For ALTER TABLE, avoid CURRENT_TIMESTAMP default to preserve compatibility
+	// with older SQLite engines and legacy DB files.
+	if err := ensureColumnExists("events", "created_at", "DATETIME"); err != nil {
+		return err
+	}
 
 	// Backfill required columns where possible.
 	db.Exec("UPDATE events SET event_id = COALESCE(event_id, lower(hex(randomblob(16)))) WHERE event_id IS NULL OR event_id = '';")
@@ -283,6 +301,30 @@ func InitDB() error {
 	}
 
 	return nil
+}
+
+func ensureColumnExists(tableName, columnName, columnDef string) error {
+	exists, err := columnExists(tableName, columnName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	stmt := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s;", tableName, columnName, columnDef)
+	if _, err := db.Exec(stmt); err != nil {
+		return fmt.Errorf("add column %s.%s: %w", tableName, columnName, err)
+	}
+	return nil
+}
+
+func columnExists(tableName, columnName string) (bool, error) {
+	query := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = ?", tableName)
+	var count int
+	if err := db.QueryRow(query, columnName).Scan(&count); err != nil {
+		return false, fmt.Errorf("check column %s.%s: %w", tableName, columnName, err)
+	}
+	return count > 0, nil
 }
 
 func GetDB() *sql.DB {
