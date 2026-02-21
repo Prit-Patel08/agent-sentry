@@ -2,10 +2,12 @@ package api
 
 import (
 	"errors"
+	"flowforge/internal/database"
 	"flowforge/internal/state"
 	"flowforge/internal/supervisor"
 	"fmt"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -84,6 +86,58 @@ func newWorkerLifecycle() *workerLifecycle {
 	return &workerLifecycle{phase: lifecycleStopped}
 }
 
+type lifecycleEvidence struct {
+	Phase     string `json:"phase"`
+	Operation string `json:"operation"`
+	PID       int    `json:"pid"`
+	Managed   bool   `json:"managed"`
+	LastError string `json:"last_error,omitempty"`
+	Trigger   string `json:"trigger"`
+}
+
+func emitLifecycleTransition(phase, operation string, pid int, managed bool, lastErr, trigger string) {
+	phase = strings.ToUpper(strings.TrimSpace(phase))
+	if phase == "" {
+		phase = "UNKNOWN"
+	}
+	operation = strings.TrimSpace(operation)
+	if operation == "" {
+		operation = "idle"
+	}
+	trigger = strings.TrimSpace(trigger)
+	if trigger == "" {
+		trigger = "lifecycle_transition"
+	}
+
+	reason := trigger
+	if lastErr != "" {
+		reason = fmt.Sprintf("%s: %s", trigger, lastErr)
+	}
+	summary := fmt.Sprintf("phase=%s operation=%s pid=%d managed=%t", phase, operation, pid, managed)
+	payload := lifecycleEvidence{
+		Phase:     phase,
+		Operation: operation,
+		PID:       pid,
+		Managed:   managed,
+		LastError: lastErr,
+		Trigger:   trigger,
+	}
+	_, _ = database.InsertEventWithPayload(
+		"lifecycle",
+		"control-plane",
+		reason,
+		"",
+		"",
+		"LIFECYCLE_"+phase,
+		summary,
+		pid,
+		0,
+		0,
+		0,
+		payload,
+	)
+}
+
 func (w *workerLifecycle) registerExternal(command string, args []string, dir string, controller WorkerController) {
 	if controller == nil {
 		return
@@ -104,6 +158,7 @@ func (w *workerLifecycle) registerExternal(command string, args []string, dir st
 	w.mu.Unlock()
 
 	state.UpdateLifecycle(lifecycleRunning, "RUNNING", w.pid)
+	emitLifecycleTransition(lifecycleRunning, opNone, w.pid, false, "", "external_worker_registered")
 }
 
 func (w *workerLifecycle) requestKill() (lifecycleAction, error) {
@@ -143,6 +198,7 @@ func (w *workerLifecycle) requestKill() (lifecycleAction, error) {
 	w.lastActionAt = time.Now()
 	w.lastActionPID = pid
 	state.UpdateLifecycle(lifecycleStopping, "STOPPING", pid)
+	emitLifecycleTransition(lifecycleStopping, opKill, pid, w.managed, "", "kill_requested")
 
 	go w.stopAsync(controller, pid, false)
 
@@ -198,6 +254,7 @@ func (w *workerLifecycle) requestRestart() (lifecycleAction, error) {
 	w.lastActionAt = time.Now()
 	w.lastActionPID = 0
 	state.UpdateLifecycle(lifecycleStarting, "STARTING", 0)
+	emitLifecycleTransition(lifecycleStarting, opRestart, 0, w.managed, "", "restart_requested")
 
 	go w.startAsync(spec)
 
@@ -233,6 +290,7 @@ func (w *workerLifecycle) stopAsync(controller WorkerController, pid int, fromWa
 		w.operation = opNone
 		w.lastErr = err.Error()
 		state.UpdateLifecycle(lifecycleFailed, "FAILED", w.pid)
+		emitLifecycleTransition(lifecycleFailed, opNone, w.pid, w.managed, w.lastErr, "stop_failed")
 		return
 	}
 
@@ -244,6 +302,7 @@ func (w *workerLifecycle) stopAsync(controller WorkerController, pid int, fromWa
 	w.operation = opNone
 	w.lastErr = ""
 	state.UpdateLifecycle(lifecycleStopped, "STOPPED", 0)
+	emitLifecycleTransition(lifecycleStopped, opNone, 0, false, "", "stop_completed")
 }
 
 func (w *workerLifecycle) startAsync(spec workerSpec) {
@@ -263,6 +322,7 @@ func (w *workerLifecycle) startAsync(spec workerSpec) {
 		w.managed = false
 		w.mu.Unlock()
 		state.UpdateLifecycle(lifecycleFailed, "FAILED", 0)
+		emitLifecycleTransition(lifecycleFailed, opNone, 0, false, err.Error(), "restart_failed")
 		return
 	}
 
@@ -280,6 +340,7 @@ func (w *workerLifecycle) startAsync(spec workerSpec) {
 
 	state.UpdateState(0, "", "RUNNING", spec.Command, spec.Args, spec.Dir, pid)
 	state.UpdateLifecycle(lifecycleRunning, "RUNNING", pid)
+	emitLifecycleTransition(lifecycleRunning, opNone, pid, true, "", "restart_completed")
 }
 
 func (w *workerLifecycle) startWatcherLocked(controller WorkerController, managed bool) uint64 {
@@ -311,11 +372,13 @@ func (w *workerLifecycle) waitForController(id uint64, controller WorkerControll
 		w.phase = lifecycleFailed
 		w.lastErr = err.Error()
 		state.UpdateLifecycle(lifecycleFailed, "FAILED", 0)
+		emitLifecycleTransition(lifecycleFailed, opNone, 0, false, w.lastErr, "worker_exit_error")
 		return
 	}
 	w.phase = lifecycleStopped
 	w.lastErr = ""
 	state.UpdateLifecycle(lifecycleStopped, "STOPPED", 0)
+	emitLifecycleTransition(lifecycleStopped, opNone, 0, false, "", "worker_exited")
 	_ = managed
 }
 

@@ -9,6 +9,18 @@ interface TimelinePanelProps {
 
 export default function TimelinePanel({ events, selectedIncidentId, onSelectIncident }: TimelinePanelProps) {
   const parseTs = (raw: string) => new Date(raw.includes("T") ? raw : raw.replace(" ", "T"));
+  const evidenceString = (event: TimelineEvent, key: string): string | null => {
+    const value = event.evidence?.[key];
+    return typeof value === "string" && value !== "" ? value : null;
+  };
+  const evidenceNumber = (event: TimelineEvent, key: string): number | null => {
+    const value = event.evidence?.[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  };
+  const evidenceBool = (event: TimelineEvent, key: string): boolean | null => {
+    const value = event.evidence?.[key];
+    return typeof value === "boolean" ? value : null;
+  };
   const eventsByIncident = new Map<string, TimelineEvent[]>();
 
   events.forEach((event, idx) => {
@@ -62,6 +74,11 @@ export default function TimelinePanel({ events, selectedIncidentId, onSelectInci
                   <p className="text-sm font-medium text-gray-200">{event.title}</p>
                   <p className="mt-1 text-xs text-gray-400">{event.summary}</p>
                   {event.reason && <p className="mt-1 text-xs text-gray-300">Reason: {event.reason}</p>}
+                  {event.type === "lifecycle" && (
+                    <p className="mt-1 text-[11px] font-mono text-cyan-300/90">
+                      Phase {evidenceString(event, "phase") || "UNKNOWN"} | Op {evidenceString(event, "operation") || "idle"} | PID {evidenceNumber(event, "pid") ?? 0} | Managed {evidenceBool(event, "managed") ? "yes" : "no"}
+                    </p>
+                  )}
                   {event.actor && <p className="mt-1 text-[11px] text-gray-500">Actor: {event.actor}</p>}
                   {(event.confidence_score || event.cpu_score || event.entropy_score) && (
                     <p className="mt-1 text-[11px] font-mono text-gray-500">

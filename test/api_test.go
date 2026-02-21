@@ -518,6 +518,87 @@ func TestWorkerLifecycleEndpointMethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestTimelineIncludesLifecycleTransitionEvidence(t *testing.T) {
+	setupTempDBForAPI(t)
+	api.ResetWorkerControlForTests()
+	os.Setenv("FLOWFORGE_API_KEY", "test-secret-key-12345")
+	defer os.Unsetenv("FLOWFORGE_API_KEY")
+
+	restartArgs := []string{"/bin/sh", "-c", "sleep 5"}
+	state.UpdateState(0, "", "STOPPED", "/bin/sh -c sleep 5", restartArgs, "", 0)
+
+	restartReq := httptest.NewRequest("POST", "/process/restart", nil)
+	restartReq.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	restartW := httptest.NewRecorder()
+	api.HandleProcessRestart(restartW, restartReq)
+	if restartW.Result().StatusCode != http.StatusAccepted {
+		t.Fatalf("expected restart status 202, got %d", restartW.Result().StatusCode)
+	}
+
+	var pid int
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		st := state.GetState()
+		if st.PID > 0 {
+			pid = st.PID
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if pid > 0 {
+		t.Cleanup(func() {
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		})
+	}
+
+	var lifecycleEvent map[string]interface{}
+	findDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(findDeadline) {
+		timelineReq := httptest.NewRequest("GET", "/timeline", nil)
+		timelineW := httptest.NewRecorder()
+		api.HandleTimeline(timelineW, timelineReq)
+		if timelineW.Result().StatusCode != http.StatusOK {
+			t.Fatalf("expected timeline status 200, got %d", timelineW.Result().StatusCode)
+		}
+
+		var payload []map[string]interface{}
+		if err := json.NewDecoder(timelineW.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode timeline: %v", err)
+		}
+		for _, ev := range payload {
+			if stringValue(ev["type"]) == "lifecycle" {
+				lifecycleEvent = ev
+				break
+			}
+		}
+		if lifecycleEvent != nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if lifecycleEvent == nil {
+		t.Fatal("expected at least one lifecycle event in timeline")
+	}
+	if !strings.HasPrefix(stringValue(lifecycleEvent["title"]), "LIFECYCLE_") {
+		t.Fatalf("expected lifecycle title prefix, got %q", stringValue(lifecycleEvent["title"]))
+	}
+
+	evidence, ok := lifecycleEvent["evidence"].(map[string]interface{})
+	if !ok || len(evidence) == 0 {
+		t.Fatalf("expected lifecycle evidence payload, got %#v", lifecycleEvent["evidence"])
+	}
+	for _, key := range []string{"phase", "operation", "pid", "managed", "trigger"} {
+		if _, ok := evidence[key]; !ok {
+			t.Fatalf("expected lifecycle evidence key %q", key)
+		}
+	}
+	if stringValue(evidence["phase"]) == "" {
+		t.Fatalf("expected non-empty lifecycle phase evidence, got %#v", evidence["phase"])
+	}
+}
+
 func TestHealthEndpoint(t *testing.T) {
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -531,6 +612,7 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestTimelineEndpoint(t *testing.T) {
+	setupTempDBForAPI(t)
 	req := httptest.NewRequest("GET", "/timeline", nil)
 	w := httptest.NewRecorder()
 

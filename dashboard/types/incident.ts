@@ -29,6 +29,7 @@ export interface TimelineEvent {
     cpu_score?: number;
     entropy_score?: number;
     confidence_score?: number;
+    evidence?: Record<string, unknown>;
 }
 
 export interface IncidentChainEvent {
@@ -49,6 +50,7 @@ export interface IncidentChainEvent {
     cpu_score: number;
     entropy_score: number;
     confidence_score: number;
+    evidence?: Record<string, unknown>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -65,6 +67,10 @@ function asNumber(value: unknown, fallback = 0): number {
 
 function asOptionalNumber(value: unknown): number | undefined {
     return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+    return isRecord(value) ? value : undefined;
 }
 
 export function parseIncidentsPayload(payload: unknown): Incident[] {
@@ -123,6 +129,7 @@ export function parseTimelinePayload(payload: unknown): TimelineEvent[] {
             cpu_score: asOptionalNumber(entry.cpu_score),
             entropy_score: asOptionalNumber(entry.entropy_score),
             confidence_score: asOptionalNumber(entry.confidence_score),
+            evidence: asRecord(entry.evidence),
         }];
     });
 }
@@ -162,6 +169,7 @@ export function parseIncidentChainPayload(payload: unknown): IncidentChainEvent[
             cpu_score: asNumber(entry.cpu_score),
             entropy_score: asNumber(entry.entropy_score),
             confidence_score: asNumber(entry.confidence_score),
+            evidence: asRecord(entry.evidence),
         }];
     });
 }

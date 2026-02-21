@@ -66,39 +66,41 @@ type DecisionTrace struct {
 }
 
 type TimelineEvent struct {
-	EventID    string  `json:"event_id,omitempty"`
-	RunID      string  `json:"run_id,omitempty"`
-	IncidentID string  `json:"incident_id,omitempty"`
-	Type       string  `json:"type"`
-	Timestamp  string  `json:"timestamp"`
-	Title      string  `json:"title"`
-	Summary    string  `json:"summary"`
-	Reason     string  `json:"reason"`
-	Actor      string  `json:"actor,omitempty"`
-	PID        int     `json:"pid"`
-	CPUScore   float64 `json:"cpu_score,omitempty"`
-	Entropy    float64 `json:"entropy_score,omitempty"`
-	Confidence float64 `json:"confidence_score,omitempty"`
+	EventID    string                 `json:"event_id,omitempty"`
+	RunID      string                 `json:"run_id,omitempty"`
+	IncidentID string                 `json:"incident_id,omitempty"`
+	Type       string                 `json:"type"`
+	Timestamp  string                 `json:"timestamp"`
+	Title      string                 `json:"title"`
+	Summary    string                 `json:"summary"`
+	Reason     string                 `json:"reason"`
+	Actor      string                 `json:"actor,omitempty"`
+	PID        int                    `json:"pid"`
+	CPUScore   float64                `json:"cpu_score,omitempty"`
+	Entropy    float64                `json:"entropy_score,omitempty"`
+	Confidence float64                `json:"confidence_score,omitempty"`
+	Evidence   map[string]interface{} `json:"evidence,omitempty"`
 }
 
 type UnifiedEvent struct {
-	ID         int     `json:"id"`
-	EventID    string  `json:"event_id"`
-	RunID      string  `json:"run_id"`
-	IncidentID string  `json:"incident_id,omitempty"`
-	EventType  string  `json:"event_type"`
-	Actor      string  `json:"actor"`
-	ReasonText string  `json:"reason_text"`
-	CreatedAt  string  `json:"created_at"`
-	Timestamp  string  `json:"timestamp"`
-	Type       string  `json:"type"`
-	Title      string  `json:"title"`
-	Summary    string  `json:"summary"`
-	Reason     string  `json:"reason"`
-	PID        int     `json:"pid"`
-	CPUScore   float64 `json:"cpu_score"`
-	Entropy    float64 `json:"entropy_score"`
-	Confidence float64 `json:"confidence_score"`
+	ID         int                    `json:"id"`
+	EventID    string                 `json:"event_id"`
+	RunID      string                 `json:"run_id"`
+	IncidentID string                 `json:"incident_id,omitempty"`
+	EventType  string                 `json:"event_type"`
+	Actor      string                 `json:"actor"`
+	ReasonText string                 `json:"reason_text"`
+	CreatedAt  string                 `json:"created_at"`
+	Timestamp  string                 `json:"timestamp"`
+	Type       string                 `json:"type"`
+	Title      string                 `json:"title"`
+	Summary    string                 `json:"summary"`
+	Reason     string                 `json:"reason"`
+	PID        int                    `json:"pid"`
+	CPUScore   float64                `json:"cpu_score"`
+	Entropy    float64                `json:"entropy_score"`
+	Confidence float64                `json:"confidence_score"`
+	Evidence   map[string]interface{} `json:"evidence,omitempty"`
 }
 
 type incidentEventPayload struct {
@@ -604,6 +606,7 @@ func GetTimeline(limit int) ([]TimelineEvent, error) {
 				CPUScore:   e.CPUScore,
 				Entropy:    e.Entropy,
 				Confidence: e.Confidence,
+				Evidence:   e.Evidence,
 			})
 		}
 		return out, nil
@@ -722,7 +725,8 @@ SELECT
 	COALESCE(pid, 0),
 	COALESCE(cpu_score, 0.0),
 	COALESCE(entropy_score, 0.0),
-	COALESCE(confidence_score, 0.0)
+	COALESCE(confidence_score, 0.0),
+	COALESCE(payload_json, '{}')
 FROM events
 ORDER BY created_at DESC, id DESC
 LIMIT ?`, limit)
@@ -733,6 +737,7 @@ LIMIT ?`, limit)
 	var list []UnifiedEvent
 	for rows.Next() {
 		var e UnifiedEvent
+		var payloadRaw string
 		if err := rows.Scan(
 			&e.ID,
 			&e.EventID,
@@ -751,9 +756,11 @@ LIMIT ?`, limit)
 			&e.CPUScore,
 			&e.Entropy,
 			&e.Confidence,
+			&payloadRaw,
 		); err != nil {
 			return nil, err
 		}
+		e.Evidence = parseEvidencePayload(payloadRaw)
 		list = append(list, e)
 	}
 	return list, nil
@@ -787,7 +794,8 @@ SELECT
 	COALESCE(pid, 0) AS pid,
 	COALESCE(cpu_score, 0.0) AS cpu_score,
 	COALESCE(entropy_score, 0.0) AS entropy_score,
-	COALESCE(confidence_score, 0.0) AS confidence_score
+	COALESCE(confidence_score, 0.0) AS confidence_score,
+	COALESCE(payload_json, '{}') AS payload_json
 FROM events
 WHERE incident_id = ?
 ORDER BY created_at ASC, id ASC
@@ -802,6 +810,7 @@ LIMIT ?;
 	out := make([]UnifiedEvent, 0)
 	for rows.Next() {
 		var e UnifiedEvent
+		var payloadRaw string
 		if err := rows.Scan(
 			&e.ID,
 			&e.EventID,
@@ -820,9 +829,11 @@ LIMIT ?;
 			&e.CPUScore,
 			&e.Entropy,
 			&e.Confidence,
+			&payloadRaw,
 		); err != nil {
 			return nil, err
 		}
+		e.Evidence = parseEvidencePayload(payloadRaw)
 		out = append(out, e)
 	}
 	return out, nil
@@ -922,6 +933,21 @@ func marshalPayload(payload any) (string, error) {
 		return "{}", nil
 	}
 	return string(b), nil
+}
+
+func parseEvidencePayload(raw string) map[string]interface{} {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" {
+		return nil
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func decryptIfPossible(value string) string {

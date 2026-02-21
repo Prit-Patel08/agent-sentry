@@ -117,6 +117,8 @@ process -> monitor -> decision -> action -> DB events -> API -> dashboard
 - `POST /process/kill`
 - `POST /process/restart`
 
+`/timeline` now includes `lifecycle` events with structured `evidence` payload for transition forensics.
+
 ## Detection Benchmark Baseline
 
 Run the fixture baseline + benchmarks:
