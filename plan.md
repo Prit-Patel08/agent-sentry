@@ -4952,6 +4952,7 @@ Build FlowForge into the trusted deterministic execution-control infrastructure 
 - [x] release checkpoint enforces strict cloud readiness (`FLOWFORGE_CLOUD_DEPS_REQUIRED=1` => `/readyz` must be ready)
 - [x] verification pipeline hardened to use explicit Go package targets (prevents `./...` scans from stalling on non-Go trees)
 - [x] local verify fast-path added (`--skip-npm-install`) to accelerate iteration without changing strict release behavior
+- [x] release checkpoint contract tests automated (local script + CI gate)
 - [x] formal SLO dashboard operations in weekly ritual
 - [x] chaos drill evidence published
 - [x] external first-time usability validation completed
