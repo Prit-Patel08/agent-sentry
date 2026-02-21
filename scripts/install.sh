@@ -169,9 +169,11 @@ go build -o flowforge .
 
 echo "Ensuring dashboard dependencies..."
 pushd dashboard >/dev/null
-if [[ ! -d "node_modules" ]]; then
-  npm ci
+if [[ -f ".next/lock" ]]; then
+  echo "Removing stale Next.js build lock (.next/lock)..."
+  rm -f .next/lock
 fi
+npm ci
 echo "Building dashboard (production)..."
 NEXT_PUBLIC_FLOWFORGE_API_BASE="http://localhost:${API_PORT}" npm run build
 popd >/dev/null
