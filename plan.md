@@ -4954,6 +4954,7 @@ Build FlowForge into the trusted deterministic execution-control infrastructure 
 - [x] local verify fast-path added (`--skip-npm-install`) to accelerate iteration without changing strict release behavior
 - [x] release checkpoint contract tests automated (local script + CI gate)
 - [x] shell script quality gate added to CI (`shellcheck` on `scripts/*.sh`)
+- [x] shellcheck policy pinned via repo-level `.shellcheckrc` (stable script lint behavior across environments)
 - [x] formal SLO dashboard operations in weekly ritual
 - [x] chaos drill evidence published
 - [x] external first-time usability validation completed

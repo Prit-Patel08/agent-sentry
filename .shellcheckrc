@@ -1,0 +1,6 @@
+# FlowForge ShellCheck baseline.
+# Keep this conservative and stable so CI behavior is deterministic across environments.
+shell=bash
+severity=warning
+external-sources=false
+source-path=SCRIPTDIR

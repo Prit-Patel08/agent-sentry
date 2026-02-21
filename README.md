@@ -172,6 +172,7 @@ If `FLOWFORGE_CLOUD_DEPS_REQUIRED=1`, it also enforces `/readyz` health (HTTP 20
 If `govulncheck` reports Go standard library advisories, upgrade your local Go patch version (CI uses Go `1.25.7`).
 Release checkpoint contract tests: `./scripts/release_checkpoint_contract_test.sh`.
 CI also enforces `shellcheck` for `scripts/*.sh`.
+ShellCheck policy is pinned in repo at `.shellcheckrc`.
 
 Expected smoke output:
 - `Runaway detected in ...`
