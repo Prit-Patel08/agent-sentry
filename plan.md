@@ -4948,6 +4948,15 @@ Build FlowForge into the trusted deterministic execution-control infrastructure 
 - [x] chaos drill evidence published
 - [ ] external first-time usability validation completed
 
+Definition of done for the external validation checkbox:
+1. run `scripts/onboarding_usability_test.sh --mode external` with a non-contributor tester.
+2. quantitative gates pass (`Overall Status: PASS`, time-to-first-value <=300s, API/dashboard probes pass).
+3. qualitative artifacts have no unresolved `TODO`:
+   - `external_feedback.md`
+   - `observer_notes.md`
+4. report shows `plan.md checkbox readiness: READY_TO_MARK_PLAN_CHECKBOX`.
+5. evidence path is published in docs or release notes.
+
 ---
 
 ## 35) Appendix — Build Discipline Contract

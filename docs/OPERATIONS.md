@@ -141,15 +141,24 @@ PILOT_FAIL_ON_MISMATCH=1 ./scripts/week2_real_pilot.sh pilot_commands.txt
 
 ## Onboarding Usability Verification
 
-Run:
+Internal tooling dry-run:
 
 ```bash
-./scripts/onboarding_usability_test.sh
+./scripts/onboarding_usability_test.sh --mode internal
+```
+
+External validation run:
+
+```bash
+./scripts/onboarding_usability_test.sh --mode external --tester-name "First Last" --tester-role "Developer"
 ```
 
 Review:
 - `pilot_artifacts/onboarding-<timestamp>/report.md`
 - `pilot_artifacts/onboarding-<timestamp>/logs/`
+- `pilot_artifacts/onboarding-<timestamp>/summary.tsv`
+- `pilot_artifacts/onboarding-<timestamp>/external_feedback.md`
+- `pilot_artifacts/onboarding-<timestamp>/observer_notes.md`
 
 Procedure for a true new-developer run:
 - `docs/ONBOARDING_USABILITY_TEST.md`
