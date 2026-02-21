@@ -112,6 +112,7 @@ process -> monitor -> decision -> action -> DB events -> API -> dashboard
 - `GET /incidents`
 - `GET /timeline`
 - `GET /timeline?incident_id=<id>`
+- `GET /worker/lifecycle`
 - `GET /metrics`
 - `POST /process/kill`
 - `POST /process/restart`

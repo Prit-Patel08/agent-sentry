@@ -447,6 +447,64 @@ func TestRepeatedKillRequestsAreIdempotent(t *testing.T) {
 	}
 }
 
+func TestWorkerLifecycleEndpointSnapshotContract(t *testing.T) {
+	api.ResetWorkerControlForTests()
+
+	cmd := exec.Command("/bin/sh", "-c", "sleep 30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start worker process: %v", err)
+	}
+	pid := cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		_, _ = cmd.Process.Wait()
+	})
+
+	state.UpdateState(0, "", "RUNNING", "/bin/sh -c sleep 30", []string{"/bin/sh", "-c", "sleep 30"}, "", pid)
+
+	req := httptest.NewRequest("GET", "/worker/lifecycle", nil)
+	w := httptest.NewRecorder()
+	api.HandleWorkerLifecycle(w, req)
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	requiredKeys := []string{"phase", "operation", "pid", "managed", "last_error", "status", "lifecycle", "command", "timestamp"}
+	for _, key := range requiredKeys {
+		if _, ok := payload[key]; !ok {
+			t.Fatalf("missing key %q in lifecycle response", key)
+		}
+	}
+
+	if stringValue(payload["phase"]) != "RUNNING" {
+		t.Fatalf("expected phase RUNNING, got %q", stringValue(payload["phase"]))
+	}
+	if intValue(payload["pid"]) != pid {
+		t.Fatalf("expected pid %d, got %d", pid, intValue(payload["pid"]))
+	}
+	if stringValue(payload["status"]) != "RUNNING" {
+		t.Fatalf("expected status RUNNING, got %q", stringValue(payload["status"]))
+	}
+}
+
+func TestWorkerLifecycleEndpointMethodNotAllowed(t *testing.T) {
+	req := httptest.NewRequest("POST", "/worker/lifecycle", nil)
+	w := httptest.NewRecorder()
+	api.HandleWorkerLifecycle(w, req)
+	resp := w.Result()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", resp.StatusCode)
+	}
+}
+
 func TestHealthEndpoint(t *testing.T) {
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()

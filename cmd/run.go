@@ -441,6 +441,7 @@ func runProcess(args []string) {
 	startWD, _ := os.Getwd()
 	api.RegisterExternalWorker(fullCommand, args, startWD, procSupervisor)
 	api.SetWorkerSpec(fullCommand, args, startWD)
+	state.UpdateState(0, "", "RUNNING", fullCommand, args, startWD, pid)
 	state.UpdateLifecycle("RUNNING", "RUNNING", pid)
 
 	var maxObservedCpu float64 = 0.0

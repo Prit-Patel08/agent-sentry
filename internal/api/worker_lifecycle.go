@@ -364,12 +364,20 @@ func (w *workerLifecycle) syncFromStateLocked() {
 		if w.phase == lifecycleStopped && w.operation == opNone {
 			w.phase = lifecycleRunning
 		}
+		return
+	}
+	if w.controller == nil && (st.PID <= 0 || !processLikelyAlive(st.PID)) {
+		w.pid = 0
+		if w.operation == opNone && w.phase != lifecycleStarting && w.phase != lifecycleStopping && w.phase != lifecycleFailed {
+			w.phase = lifecycleStopped
+		}
 	}
 }
 
 func (w *workerLifecycle) snapshot() map[string]interface{} {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.syncFromStateLocked()
 	return map[string]interface{}{
 		"phase":     w.phase,
 		"operation": w.operation,

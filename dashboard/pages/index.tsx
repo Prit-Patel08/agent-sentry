@@ -44,6 +44,19 @@ interface LiveStats {
   status: string;
   command: string;
   pid: number;
+  lifecycle?: string;
+}
+
+interface WorkerLifecycle {
+  phase: string;
+  operation: string;
+  pid: number;
+  managed: boolean;
+  last_error: string;
+  status: string;
+  lifecycle: string;
+  command: string;
+  timestamp: number;
 }
 
 export default function Dashboard() {
@@ -57,6 +70,24 @@ export default function Dashboard() {
     `${API_BASE}/timeline`,
     fetchTimeline,
     { refreshInterval: 3000, fallbackData: [] }
+  );
+  const { data: lifecycle } = useSWR<WorkerLifecycle>(
+    `${API_BASE}/worker/lifecycle`,
+    async (url: string): Promise<WorkerLifecycle> => (await fetchJSON(url)) as WorkerLifecycle,
+    {
+      refreshInterval: 1000,
+      fallbackData: {
+        phase: 'STOPPED',
+        operation: '',
+        pid: 0,
+        managed: false,
+        last_error: '',
+        status: 'STOPPED',
+        lifecycle: 'STOPPED',
+        command: '',
+        timestamp: 0
+      }
+    }
   );
   const [selectedIncidentID, setSelectedIncidentID] = useState<string | null>(null);
   const [incidentShareURL, setIncidentShareURL] = useState<string | null>(null);
@@ -306,7 +337,7 @@ export default function Dashboard() {
                               throw new Error(data.error || `Request failed (${res.status})`);
                             }
                             setKillStatusIsError(false);
-                            setKillStatus(`Process ${data.pid ?? liveStats.pid} killed successfully`);
+                            setKillStatus(`Stop requested for PID ${data.pid ?? liveStats.pid}`);
                             setKillConfirm(false);
                             mutate(`${API_BASE}/incidents`);
                             setTimeout(() => setKillStatus(null), 3000);
@@ -407,6 +438,43 @@ export default function Dashboard() {
             <IncidentTable incidents={incidents || []} />
             </div>
             <div className="space-y-6">
+              <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold tracking-wide text-gray-200">Worker Lifecycle</h3>
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                    lifecycle?.phase === 'RUNNING' ? 'bg-green-500/20 text-green-300 border border-green-500/30'
+                    : lifecycle?.phase === 'STARTING' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                    : lifecycle?.phase === 'STOPPING' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    : lifecycle?.phase === 'FAILED' ? 'bg-red-500/20 text-red-300 border border-red-500/30'
+                    : 'bg-gray-700/40 text-gray-300 border border-gray-600'
+                  }`}>
+                    {lifecycle?.phase || 'UNKNOWN'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="rounded-md bg-black/20 p-2">
+                    <p className="text-gray-500">Operation</p>
+                    <p className="font-mono text-gray-200">{lifecycle?.operation || 'idle'}</p>
+                  </div>
+                  <div className="rounded-md bg-black/20 p-2">
+                    <p className="text-gray-500">PID</p>
+                    <p className="font-mono text-gray-200">{lifecycle?.pid || 0}</p>
+                  </div>
+                  <div className="rounded-md bg-black/20 p-2">
+                    <p className="text-gray-500">Controller</p>
+                    <p className="font-mono text-gray-200">{lifecycle?.managed ? 'managed' : 'external'}</p>
+                  </div>
+                  <div className="rounded-md bg-black/20 p-2">
+                    <p className="text-gray-500">State Status</p>
+                    <p className="font-mono text-gray-200">{lifecycle?.status || 'STOPPED'}</p>
+                  </div>
+                </div>
+                {lifecycle?.last_error && (
+                  <div className="mt-3 rounded-md border border-red-500/20 bg-red-900/10 px-2 py-1 text-xs text-red-300">
+                    Last error: {lifecycle.last_error}
+                  </div>
+                )}
+              </div>
               <TimelinePanel
                 events={timeline || []}
                 selectedIncidentId={selectedIncidentID}

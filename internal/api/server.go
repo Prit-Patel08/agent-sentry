@@ -166,6 +166,7 @@ func Start(port string) func() {
 	mux.HandleFunc("/healthz", withSecurity(HandleHealth))
 	mux.HandleFunc("/readyz", withSecurity(HandleReady))
 	mux.HandleFunc("/metrics", withSecurity(HandleMetrics))
+	mux.HandleFunc("/worker/lifecycle", withSecurity(HandleWorkerLifecycle))
 	mux.HandleFunc("/timeline", withSecurity(HandleTimeline))
 
 	addr := resolveBindAddr(port)
@@ -286,6 +287,32 @@ func HandleMetrics(w http.ResponseWriter, r *http.Request) {
 	active := st.Status != "STOPPED" && st.PID > 0
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = fmt.Fprint(w, apiMetrics.Prometheus(active))
+}
+
+// HandleWorkerLifecycle exposes lifecycle control-plane state for operators/UI.
+func HandleWorkerLifecycle(w http.ResponseWriter, r *http.Request) {
+	corsMiddleware(w, r)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	snap := WorkerLifecycleSnapshot()
+	st := state.GetState()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"phase":      snap["phase"],
+		"operation":  snap["operation"],
+		"pid":        snap["pid"],
+		"managed":    snap["managed"],
+		"last_error": snap["last_err"],
+		"status":     st.Status,
+		"lifecycle":  st.Lifecycle,
+		"command":    st.Command,
+		"timestamp":  st.Timestamp,
+	})
 }
 
 func HandleTimeline(w http.ResponseWriter, r *http.Request) {
