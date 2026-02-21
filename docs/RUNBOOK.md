@@ -68,6 +68,10 @@ curl -X POST \
 Expected response shape:
 `{"status":"restarting","command":"<command>","pid":12345}`
 
+Guardrail:
+- Restart only proceeds when no active worker PID is alive.
+- If a worker is still running, API returns `409` and you should run `/process/kill` first.
+
 ```bash
 curl -X POST \
   -H "Authorization: Bearer $FLOWFORGE_API_KEY" \

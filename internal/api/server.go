@@ -433,12 +433,9 @@ func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if stats.Status != "STOPPED" && stats.PID > 0 {
-		if err := killProcessTree(stats.PID); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":"Failed to stop existing process: %v"}`, err), http.StatusInternalServerError)
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
+	if stats.PID > 0 && processLikelyAlive(stats.PID) {
+		http.Error(w, `{"error":"Process is still running; stop/kill it and wait for exit before restart."}`, http.StatusConflict)
+		return
 	}
 
 	cmd := exec.Command(stats.Args[0], stats.Args[1:]...)
@@ -482,6 +479,17 @@ func killProcessTree(pid int) error {
 		return nil
 	}
 	return fmt.Errorf("group kill failed: %v; pid kill failed: %w", groupErr, pidErr)
+}
+
+func processLikelyAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	if err == nil {
+		return true
+	}
+	return !errors.Is(err, syscall.ESRCH)
 }
 
 func actorFromRequest(r *http.Request) string {

@@ -308,6 +308,40 @@ func TestRestartEndpointUpdatesRuntimeState(t *testing.T) {
 	}
 }
 
+func TestRestartEndpointRejectsWhileProcessRunning(t *testing.T) {
+	os.Setenv("FLOWFORGE_API_KEY", "test-secret-key-12345")
+	defer os.Unsetenv("FLOWFORGE_API_KEY")
+
+	cmd := exec.Command("/bin/sh", "-c", "sleep 30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start worker process: %v", err)
+	}
+	pid := cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		_, _ = cmd.Process.Wait()
+	})
+
+	restartArgs := []string{"/bin/sh", "-c", "sleep 30"}
+	state.UpdateState(0, "", "RUNNING", "/bin/sh -c sleep 30", restartArgs, "", pid)
+
+	req := httptest.NewRequest("POST", "/process/restart", nil)
+	req.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	w := httptest.NewRecorder()
+	api.HandleProcessRestart(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 while process is running, got %d", resp.StatusCode)
+	}
+
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("expected original process to remain alive, got kill(0) error: %v", err)
+	}
+}
+
 func TestHealthEndpoint(t *testing.T) {
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
