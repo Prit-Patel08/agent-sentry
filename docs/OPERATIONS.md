@@ -71,16 +71,24 @@ Optional local commit gate:
 Equivalent make shortcuts:
 
 ```bash
+make go-tools
 make doctor
 make doctor-summary
 make contracts
 make precommit
+make ops-snapshot
 ```
 
 `make contracts` runs:
 - `scripts/tooling_doctor_contract_test.sh`
 - `scripts/release_checkpoint_contract_test.sh`
 - `scripts/install_git_hook_contract_test.sh`
+
+Cloud readiness smoke:
+
+```bash
+./scripts/cloud_ready_smoke.sh
+```
 
 Notes:
 - strict mode fails if `staticcheck`/`govulncheck` are missing

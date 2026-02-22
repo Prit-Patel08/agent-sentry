@@ -149,6 +149,7 @@ Fixtures:
 New machine bootstrap + first successful gate run:
 
 ```bash
+make go-tools
 make doctor
 npm --prefix dashboard ci
 make contracts
@@ -165,6 +166,12 @@ Generate a local tooling summary artifact:
 
 ```bash
 make doctor-summary
+```
+
+Generate one operational snapshot artifact bundle:
+
+```bash
+make ops-snapshot
 ```
 
 One-command local gate:
@@ -203,6 +210,8 @@ Fast local pre-commit checks: `./scripts/precommit_checks.sh`.
 Install a managed git pre-commit hook: `./scripts/install_git_hook.sh`.
 Install strict hook mode: `./scripts/install_git_hook.sh --strict`.
 Git hook installer contract tests: `./scripts/install_git_hook_contract_test.sh`.
+Cloud dependency + readyz smoke: `./scripts/cloud_ready_smoke.sh`.
+Ops status snapshot artifact: `./scripts/ops_status_snapshot.sh`.
 
 Expected smoke output:
 - `Runaway detected in ...`
@@ -306,6 +315,7 @@ Report output:
 - threat model: `docs/THREAT_MODEL.md`
 - runbook: `docs/RUNBOOK.md`
 - cloud-dev dependency stack: `infra/local-cloud/README.md`
+- operator command map: `docs/OPERATOR_COMMAND_MAP.md`
 - onboarding usability test: `docs/ONBOARDING_USABILITY_TEST.md`
 - week 1 checklist: `docs/WEEK1_PILOT.md`
 - week 2 baseline: `docs/WEEK2_BASELINE.md`

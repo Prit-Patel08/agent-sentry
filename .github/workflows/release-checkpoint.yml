@@ -22,11 +22,8 @@ jobs:
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
 
-      - name: Install staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@latest
-
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Install pinned Go toolchain helpers
+        run: bash ./scripts/install_go_tools.sh
 
       - name: Expose tools in PATH
         run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"

@@ -4962,6 +4962,7 @@ Build FlowForge into the trusted deterministic execution-control infrastructure 
 - [x] developer bootstrap path simplified (Makefile shortcuts + CI tooling-doctor strict gate + first-run quickstart)
 - [x] tooling diagnostics operationalized (summary artifact output + CI artifact upload + make shortcut)
 - [x] tooling doctor behavior contract-tested and enforced in CI contract suite
+- [x] operator workflows consolidated (pinned go-tool installer, cloud-ready smoke, ops snapshot artifacts, command map)
 - [x] formal SLO dashboard operations in weekly ritual
 - [x] chaos drill evidence published
 - [x] external first-time usability validation completed

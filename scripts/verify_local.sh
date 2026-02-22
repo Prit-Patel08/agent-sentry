@@ -56,8 +56,6 @@ resolve_tool() {
 
 run_optional_tool() {
   local name="$1"
-  local module="$2"
-  shift
   shift
   local tool_path
   if tool_path="$(resolve_tool "$name")"; then
@@ -67,7 +65,7 @@ run_optional_tool() {
 
   if [[ "$STRICT_MODE" == "1" ]]; then
     echo "ERROR: $name is required in strict mode but not installed." >&2
-    echo "Install with: go install ${module}@latest (or add it to PATH)" >&2
+    echo "Install with: ./scripts/install_go_tools.sh --only ${name} (or add it to PATH)" >&2
     return 1
   fi
 
@@ -109,13 +107,13 @@ echo "[4/7] go vet explicit Go package set"
 go vet "${GO_TEST_PKGS[@]}"
 
 echo "[5/7] staticcheck explicit Go package set"
-if ! run_optional_tool "staticcheck" "honnef.co/go/tools/cmd/staticcheck" "${GO_TEST_PKGS[@]}"; then
+if ! run_optional_tool "staticcheck" "${GO_TEST_PKGS[@]}"; then
   echo "ERROR: staticcheck failed." >&2
   exit 1
 fi
 
 echo "[6/7] govulncheck explicit Go package set"
-if ! run_optional_tool "govulncheck" "golang.org/x/vuln/cmd/govulncheck" "${GO_TEST_PKGS[@]}"; then
+if ! run_optional_tool "govulncheck" "${GO_TEST_PKGS[@]}"; then
   echo "ERROR: govulncheck failed." >&2
   echo "If this is a Go standard library advisory, upgrade your local Go patch toolchain (e.g. 1.25.7+)." >&2
   exit 1

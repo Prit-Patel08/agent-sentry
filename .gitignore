@@ -20,6 +20,7 @@ incident_*.md
 flowforge_report_*.md
 logs/
 pilot_artifacts/
+smoke_artifacts/
 ci_artifacts/
 trigger.txt
 pilot_commands.txt
