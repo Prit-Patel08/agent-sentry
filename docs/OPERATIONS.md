@@ -115,6 +115,7 @@ Notes:
 
 Published drill evidence:
 - `docs/CHAOS_DRILL_2026-02-21.md`
+- `docs/CONTROLPLANE_REPLAY_DRILL_2026-02-22.md`
 
 ## Weekly SLO Dashboard Ritual
 
