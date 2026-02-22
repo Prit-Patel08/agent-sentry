@@ -217,6 +217,7 @@ If `FLOWFORGE_REQUIRE_CONTROLPLANE_REPLAY_DRILL=1`, it enforces a passing `contr
 If `FLOWFORGE_RUN_CONTROLPLANE_REPLAY_RETENTION=1`, it runs replay-ledger retention prune and records artifact output in release report.
 If `govulncheck` reports Go standard library advisories, upgrade your local Go patch version (CI uses Go `1.25.7`).
 Release checkpoint contract tests: `./scripts/release_checkpoint_contract_test.sh`.
+Replay retention contract tests: `./scripts/controlplane_replay_retention_contract_test.sh`.
 Tooling doctor contract tests: `./scripts/tooling_doctor_contract_test.sh`.
 CI also enforces `shellcheck` for `scripts/*.sh`.
 CI also runs `tooling_doctor.sh --strict`.

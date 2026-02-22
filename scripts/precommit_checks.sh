@@ -63,7 +63,10 @@ else
   echo "WARN: shellcheck not installed; skipping (use --strict to fail instead)."
 fi
 
-echo "[4/4] Release checkpoint contract tests"
+echo "[4/5] Release checkpoint contract tests"
 ./scripts/release_checkpoint_contract_test.sh
+
+echo "[5/5] Control-plane replay retention contract tests"
+./scripts/controlplane_replay_retention_contract_test.sh
 
 echo "✅ Pre-commit checks passed"

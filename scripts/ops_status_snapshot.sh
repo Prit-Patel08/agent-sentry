@@ -82,6 +82,9 @@ if [[ "$SKIP_CONTRACTS" == "0" ]]; then
   if ! run_check "contract_release_checkpoint" "scripts/release_checkpoint_contract_test.sh" ./scripts/release_checkpoint_contract_test.sh; then
     snapshot_status=1
   fi
+  if ! run_check "contract_controlplane_replay_retention" "scripts/controlplane_replay_retention_contract_test.sh" ./scripts/controlplane_replay_retention_contract_test.sh; then
+    snapshot_status=1
+  fi
   if ! run_check "contract_install_hook" "scripts/install_git_hook_contract_test.sh" ./scripts/install_git_hook_contract_test.sh; then
     snapshot_status=1
   fi

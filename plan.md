@@ -4973,6 +4973,7 @@ Build FlowForge into the trusted deterministic execution-control infrastructure 
 - [x] control-plane replay drill evidence published
 - [x] release checkpoint replay gate + replay-ledger retention automation implemented (optional strict gate, contract tests, retention prune tooling)
 - [x] replay-ledger observability hardening implemented (API metrics gauges + weekly SLO capacity signal + release-checkpoint retention auto-run toggle)
+- [x] replay-retention contract tests integrated into local + CI reliability gates
 
 Definition of done for the external validation checkbox:
 1. run `scripts/onboarding_usability_test.sh --mode external` with a non-contributor tester.
