@@ -971,23 +971,44 @@ func TestMetricsIncludeLifecycleLatencySLOSignals(t *testing.T) {
 		t.Fatalf("expected restart status 202, got %d", restartW.Result().StatusCode)
 	}
 
+	lifecycleSnapshot := func() (map[string]interface{}, int, string) {
+		req := httptest.NewRequest("GET", "/worker/lifecycle", nil)
+		w := httptest.NewRecorder()
+		api.HandleWorkerLifecycle(w, req)
+		body := w.Body.String()
+		var payload map[string]interface{}
+		_ = json.Unmarshal([]byte(body), &payload)
+		return payload, w.Result().StatusCode, body
+	}
+
 	var pid int
 	restartDeadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(restartDeadline) {
-		st := state.GetState()
-		if st.Status == "RUNNING" && st.PID > 0 {
+		if st := state.GetState(); st.PID > 0 {
 			pid = st.PID
 			break
+		}
+
+		lifecyclePayload, lifecycleStatus, _ := lifecycleSnapshot()
+		if lifecycleStatus == http.StatusOK {
+			if stringValue(lifecyclePayload["phase"]) == "RUNNING" && intValue(lifecyclePayload["pid"]) > 0 {
+				pid = intValue(lifecyclePayload["pid"])
+				break
+			}
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 	if pid == 0 {
 		st := state.GetState()
-		lifecycleReq := httptest.NewRequest("GET", "/worker/lifecycle", nil)
-		lifecycleW := httptest.NewRecorder()
-		api.HandleWorkerLifecycle(lifecycleW, lifecycleReq)
-		lifecycleBody := lifecycleW.Body.String()
-		t.Fatalf("expected restarted process pid > 0 (state=%+v lifecycle_status=%d lifecycle_body=%s)", st, lifecycleW.Result().StatusCode, lifecycleBody)
+		lifecyclePayload, lifecycleStatus, lifecycleBody := lifecycleSnapshot()
+		t.Fatalf(
+			"expected restarted process pid > 0 (state=%+v lifecycle_status=%d lifecycle_phase=%q lifecycle_pid=%v lifecycle_body=%s)",
+			st,
+			lifecycleStatus,
+			stringValue(lifecyclePayload["phase"]),
+			lifecyclePayload["pid"],
+			lifecycleBody,
+		)
 	}
 	t.Cleanup(func() {
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
@@ -1004,8 +1025,11 @@ func TestMetricsIncludeLifecycleLatencySLOSignals(t *testing.T) {
 
 	stopDeadline := time.Now().Add(6 * time.Second)
 	for time.Now().Before(stopDeadline) {
-		st := state.GetState()
-		if st.Status == "STOPPED" {
+		if st := state.GetState(); st.Status == "STOPPED" {
+			break
+		}
+		lifecyclePayload, lifecycleStatus, _ := lifecycleSnapshot()
+		if lifecycleStatus == http.StatusOK && stringValue(lifecyclePayload["phase"]) == "STOPPED" {
 			break
 		}
 		time.Sleep(25 * time.Millisecond)
