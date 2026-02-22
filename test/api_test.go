@@ -1004,6 +1004,129 @@ func TestMetricsIncludeLifecycleLatencySLOSignals(t *testing.T) {
 	}
 }
 
+func TestControlPlaneReplayHistoryEndpointContract(t *testing.T) {
+	setupTempDBForAPI(t)
+	database.SetRunID("run-replay-history")
+
+	for i := 0; i < 2; i++ {
+		if _, err := database.InsertEvent(
+			"audit",
+			"control-plane",
+			"served cached response",
+			"run-replay-history",
+			"incident-replay-history",
+			"IDEMPOTENT_REPLAY",
+			"served cached control-plane mutation response",
+			0,
+			0,
+			0,
+			0,
+		); err != nil {
+			t.Fatalf("insert replay event: %v", err)
+		}
+	}
+	if _, err := database.InsertEvent(
+		"audit",
+		"control-plane",
+		"idempotency key reused with different payload",
+		"run-replay-history",
+		"incident-replay-history",
+		"IDEMPOTENT_CONFLICT",
+		"idempotency key reused with different request payload",
+		0,
+		0,
+		0,
+		0,
+	); err != nil {
+		t.Fatalf("insert conflict event: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/v1/ops/controlplane/replay/history?days=7", nil)
+	w := httptest.NewRecorder()
+	api.HandleControlPlaneReplayHistory(w, req)
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode replay history payload: %v", err)
+	}
+
+	if intValue(payload["days"]) != 7 {
+		t.Fatalf("expected days=7, got %#v", payload["days"])
+	}
+	if _, ok := payload["row_count"]; !ok {
+		t.Fatalf("expected row_count in replay history payload")
+	}
+	if _, ok := payload["oldest_age_seconds"]; !ok {
+		t.Fatalf("expected oldest_age_seconds in replay history payload")
+	}
+
+	pointsRaw, ok := payload["points"].([]interface{})
+	if !ok {
+		t.Fatalf("expected points array, got %T", payload["points"])
+	}
+	if len(pointsRaw) != 7 {
+		t.Fatalf("expected 7 history points, got %d", len(pointsRaw))
+	}
+
+	today := time.Now().UTC().Format("2006-01-02")
+	foundToday := false
+	for _, item := range pointsRaw {
+		point, ok := item.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected point object, got %T", item)
+		}
+		day := stringValue(point["day"])
+		if day == "" {
+			t.Fatalf("expected non-empty point day, got %#v", point["day"])
+		}
+		if day != today {
+			continue
+		}
+		foundToday = true
+		if got := intValue(point["replay_events"]); got != 2 {
+			t.Fatalf("expected today replay_events=2, got %d", got)
+		}
+		if got := intValue(point["conflict_events"]); got != 1 {
+			t.Fatalf("expected today conflict_events=1, got %d", got)
+		}
+	}
+	if !foundToday {
+		t.Fatalf("expected a history point for today (%s)", today)
+	}
+}
+
+func TestControlPlaneReplayHistoryEndpointRejectsInvalidDays(t *testing.T) {
+	setupTempDBForAPI(t)
+
+	cases := []string{
+		"/v1/ops/controlplane/replay/history?days=0",
+		"/v1/ops/controlplane/replay/history?days=91",
+		"/v1/ops/controlplane/replay/history?days=abc",
+	}
+	for _, path := range cases {
+		req := httptest.NewRequest("GET", path, nil)
+		w := httptest.NewRecorder()
+		api.HandleControlPlaneReplayHistory(w, req)
+		resp := w.Result()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("path %s expected status 400, got %d", path, resp.StatusCode)
+		}
+
+		var payload map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("path %s decode error payload: %v", path, err)
+		}
+		errMsg := strings.ToLower(stringValue(payload["error"]))
+		if !strings.Contains(errMsg, "days must be an integer between 1 and 90") {
+			t.Fatalf("path %s expected days validation error, got %#v", path, payload["error"])
+		}
+	}
+}
+
 func TestHealthEndpoint(t *testing.T) {
 	req := httptest.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()

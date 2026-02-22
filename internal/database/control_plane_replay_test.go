@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 func TestControlPlaneReplayInsertGetTouch(t *testing.T) {
@@ -199,5 +200,75 @@ WHERE idempotency_key = 'stats-key-new'
 	}
 	if stats.NewestAgeSeconds > 120 {
 		t.Fatalf("expected newest_age_seconds to be near-now, got %d", stats.NewestAgeSeconds)
+	}
+}
+
+func TestGetControlPlaneReplayDailyTrend(t *testing.T) {
+	_ = withTempDBPath(t)
+	CloseDB()
+	if err := InitDB(); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if _, err := InsertEvent(
+			"audit",
+			"control-plane",
+			"served cached response",
+			"run-replay-trend",
+			"incident-replay-trend",
+			"IDEMPOTENT_REPLAY",
+			"served cached control-plane mutation response",
+			0,
+			0,
+			0,
+			0,
+		); err != nil {
+			t.Fatalf("insert replay event: %v", err)
+		}
+	}
+	if _, err := InsertEvent(
+		"audit",
+		"control-plane",
+		"idempotency key reused with different payload",
+		"run-replay-trend",
+		"incident-replay-trend",
+		"IDEMPOTENT_CONFLICT",
+		"idempotency key reused with different request payload",
+		0,
+		0,
+		0,
+		0,
+	); err != nil {
+		t.Fatalf("insert conflict event: %v", err)
+	}
+
+	points, err := GetControlPlaneReplayDailyTrend(3)
+	if err != nil {
+		t.Fatalf("GetControlPlaneReplayDailyTrend: %v", err)
+	}
+	if len(points) != 3 {
+		t.Fatalf("expected 3 daily points, got %d", len(points))
+	}
+
+	today := time.Now().UTC().Format("2006-01-02")
+	foundToday := false
+	for _, point := range points {
+		if point.Day == "" {
+			t.Fatalf("expected non-empty day in point: %#v", point)
+		}
+		if point.Day != today {
+			continue
+		}
+		foundToday = true
+		if point.ReplayEvents != 2 {
+			t.Fatalf("expected today replay_events=2, got %d", point.ReplayEvents)
+		}
+		if point.ConflictEvents != 1 {
+			t.Fatalf("expected today conflict_events=1, got %d", point.ConflictEvents)
+		}
+	}
+	if !foundToday {
+		t.Fatalf("expected trend to include today (%s)", today)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type ControlPlaneReplay struct {
@@ -22,6 +23,12 @@ type ControlPlaneReplayStats struct {
 	RowCount         int `json:"row_count"`
 	OldestAgeSeconds int `json:"oldest_age_seconds"`
 	NewestAgeSeconds int `json:"newest_age_seconds"`
+}
+
+type ControlPlaneReplayDailyTrend struct {
+	Day            string `json:"day"`
+	ReplayEvents   int    `json:"replay_events"`
+	ConflictEvents int    `json:"conflict_events"`
 }
 
 func GetControlPlaneReplay(idempotencyKey, endpoint string) (ControlPlaneReplay, error) {
@@ -194,6 +201,71 @@ FROM control_plane_replays
 		return ControlPlaneReplayStats{}, err
 	}
 	return stats, nil
+}
+
+func GetControlPlaneReplayDailyTrend(days int) ([]ControlPlaneReplayDailyTrend, error) {
+	if db == nil {
+		return nil, fmt.Errorf("db not initialized")
+	}
+	if days <= 0 {
+		days = 7
+	}
+	if days > 90 {
+		days = 90
+	}
+
+	timeCol := "created_at"
+	hasCreatedAt, err := columnExists("events", "created_at")
+	if err != nil {
+		return nil, err
+	}
+	if !hasCreatedAt {
+		timeCol = "timestamp"
+	}
+
+	window := fmt.Sprintf("-%d day", days-1)
+	query := fmt.Sprintf(`
+SELECT
+	date(COALESCE(%[1]s, timestamp, CURRENT_TIMESTAMP)) AS day,
+	SUM(CASE WHEN UPPER(title)='IDEMPOTENT_REPLAY' THEN 1 ELSE 0 END) AS replay_events,
+	SUM(CASE WHEN UPPER(title)='IDEMPOTENT_CONFLICT' THEN 1 ELSE 0 END) AS conflict_events
+FROM events
+WHERE event_type='audit'
+  AND UPPER(title) IN ('IDEMPOTENT_REPLAY', 'IDEMPOTENT_CONFLICT')
+  AND date(COALESCE(%[1]s, timestamp, CURRENT_TIMESTAMP)) >= date('now', ?)
+GROUP BY day
+ORDER BY day ASC
+`, timeCol)
+
+	rows, err := db.Query(query, window)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	byDay := make(map[string]ControlPlaneReplayDailyTrend, days)
+	for rows.Next() {
+		var point ControlPlaneReplayDailyTrend
+		if err := rows.Scan(&point.Day, &point.ReplayEvents, &point.ConflictEvents); err != nil {
+			return nil, err
+		}
+		byDay[point.Day] = point
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	startDay := time.Now().UTC().AddDate(0, 0, -(days - 1))
+	out := make([]ControlPlaneReplayDailyTrend, 0, days)
+	for i := 0; i < days; i++ {
+		day := startDay.AddDate(0, 0, i).Format("2006-01-02")
+		point, ok := byDay[day]
+		if !ok {
+			point = ControlPlaneReplayDailyTrend{Day: day}
+		}
+		out = append(out, point)
+	}
+	return out, nil
 }
 
 // PurgeControlPlaneReplays deletes stale replay rows.

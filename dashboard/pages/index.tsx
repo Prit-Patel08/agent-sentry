@@ -99,6 +99,20 @@ interface LifecycleSLO {
   replayStatsError: number;
 }
 
+interface ReplayHistoryPoint {
+  day: string;
+  replay_events: number;
+  conflict_events: number;
+}
+
+interface ReplayHistory {
+  days: number;
+  row_count: number;
+  oldest_age_seconds: number;
+  newest_age_seconds: number;
+  points: ReplayHistoryPoint[];
+}
+
 const REPLAY_ROW_CAP_TARGET = 50000;
 
 export default function Dashboard() {
@@ -166,6 +180,20 @@ export default function Dashboard() {
         replayRows: 0,
         replayOldestAgeSeconds: 0,
         replayStatsError: 0
+      }
+    }
+  );
+  const { data: replayHistory } = useSWR<ReplayHistory>(
+    `${API_BASE}/v1/ops/controlplane/replay/history?days=7`,
+    async (url: string): Promise<ReplayHistory> => (await fetchJSON(url)) as ReplayHistory,
+    {
+      refreshInterval: 10000,
+      fallbackData: {
+        days: 7,
+        row_count: 0,
+        oldest_age_seconds: 0,
+        newest_age_seconds: 0,
+        points: []
       }
     }
   );
@@ -292,6 +320,11 @@ export default function Dashboard() {
     : confidence >= 65 ? 'Medium certainty'
     : 'Low certainty';
   const replayOldestAgeHours = (lifecycleSLO?.replayOldestAgeSeconds ?? 0) / 3600;
+  const replayTrendPoints = replayHistory?.points ?? [];
+  const replayTrendMax = replayTrendPoints.reduce((max, point) => {
+    const total = point.replay_events + point.conflict_events;
+    return total > max ? total : max;
+  }, 0);
   const sloOnTrack =
     (lifecycleSLO?.stopComplianceRatio ?? 0) >= 0.95 &&
     (lifecycleSLO?.restartComplianceRatio ?? 0) >= 0.95 &&
@@ -663,6 +696,43 @@ export default function Dashboard() {
                     <p className="text-gray-500">Idempotent Replays</p>
                     <p className="font-mono text-gray-200">{Math.round(lifecycleSLO?.idempotencyReplays ?? 0)}</p>
                   </div>
+                </div>
+                <div className="mt-3 rounded-md bg-black/20 p-2 text-xs">
+                  <p className="text-gray-500">Replay Trend (last {replayHistory?.days ?? 7} days)</p>
+                  <div className="mt-2 space-y-1">
+                    {replayTrendPoints.length === 0 && (
+                      <p className="text-[11px] text-gray-500">No replay/conflict activity recorded yet.</p>
+                    )}
+                    {replayTrendPoints.map((point) => {
+                      const replayCount = point.replay_events ?? 0;
+                      const conflictCount = point.conflict_events ?? 0;
+                      const total = replayCount + conflictCount;
+                      const replayWidthPct = replayTrendMax > 0 ? (replayCount / replayTrendMax) * 100 : 0;
+                      const conflictWidthPct = replayTrendMax > 0 ? (conflictCount / replayTrendMax) * 100 : 0;
+                      return (
+                        <div key={point.day} className="grid grid-cols-[48px_1fr_72px] items-center gap-2">
+                          <p className="font-mono text-[11px] text-gray-400">{point.day.slice(5)}</p>
+                          <div className="h-1.5 overflow-hidden rounded bg-gray-800">
+                            <div className="flex h-full">
+                              <div
+                                className="h-full bg-accent-500/80"
+                                style={{ width: `${replayWidthPct}%` }}
+                              />
+                              <div
+                                className="h-full bg-amber-400/80"
+                                style={{ width: `${conflictWidthPct}%` }}
+                              />
+                            </div>
+                          </div>
+                          <p className="font-mono text-right text-[11px] text-gray-300">
+                            {replayCount}/{conflictCount}
+                            <span className="ml-1 text-gray-500">({total})</span>
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-[11px] text-gray-500">format: replay/conflict (total)</p>
                 </div>
               </div>
               <TimelinePanel

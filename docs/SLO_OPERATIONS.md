@@ -16,7 +16,7 @@ This document is the canonical process for:
 ## Inputs
 
 Required:
-1. local API endpoints: `/healthz`, `/readyz`, `/metrics`, `/timeline`
+1. local API endpoints: `/healthz`, `/readyz`, `/metrics`, `/timeline`, `/v1/ops/controlplane/replay/history?days=7`
 2. SQLite events database (`FLOWFORGE_DB_PATH`, default `flowforge.db`)
 3. weekly report script:
 
@@ -70,6 +70,7 @@ Output directory default:
 4. Replay ledger row capacity:
 - target: `<= 50000`
 - source: `control_plane_replays` row count (and `/metrics` replay-row gauges)
+- trend context: `/v1/ops/controlplane/replay/history?days=7` replay/conflict daily series
 
 ## Weekly Ritual (Mandatory)
 

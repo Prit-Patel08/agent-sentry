@@ -173,6 +173,7 @@ func Start(port string) func() {
 	mux.HandleFunc("/healthz", withSecurity(HandleHealth))
 	mux.HandleFunc("/readyz", withSecurity(HandleReady))
 	mux.HandleFunc("/metrics", withSecurity(HandleMetrics))
+	mux.HandleFunc("/v1/ops/controlplane/replay/history", withSecurity(HandleControlPlaneReplayHistory))
 	mux.HandleFunc("/worker/lifecycle", withSecurity(HandleWorkerLifecycle))
 	mux.HandleFunc("/timeline", withSecurity(HandleTimeline))
 	mux.HandleFunc("/v1/integrations/workspaces/register", withSecurity(HandleIntegrationWorkspaceRegister))
@@ -329,6 +330,56 @@ func HandleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = fmt.Fprint(w, apiMetrics.Prometheus(active))
 	_, _ = fmt.Fprint(w, controlPlaneReplayPrometheus())
+}
+
+// HandleControlPlaneReplayHistory exposes replay/conflict event trend for recent days.
+func HandleControlPlaneReplayHistory(w http.ResponseWriter, r *http.Request) {
+	corsMiddleware(w, r)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	days := 7
+	if rawDays := strings.TrimSpace(r.URL.Query().Get("days")); rawDays != "" {
+		parsedDays, err := strconv.Atoi(rawDays)
+		if err != nil || parsedDays < 1 || parsedDays > 90 {
+			writeJSONError(w, http.StatusBadRequest, "days must be an integer between 1 and 90")
+			return
+		}
+		days = parsedDays
+	}
+
+	if database.GetDB() == nil {
+		if err := database.InitDB(); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "Database not initialized")
+			return
+		}
+	}
+
+	stats, err := database.GetControlPlaneReplayStats()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to load replay stats: %v", err))
+		return
+	}
+
+	points, err := database.GetControlPlaneReplayDailyTrend(days)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to load replay history: %v", err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"days":               days,
+		"row_count":          stats.RowCount,
+		"oldest_age_seconds": stats.OldestAgeSeconds,
+		"newest_age_seconds": stats.NewestAgeSeconds,
+		"points":             points,
+	})
 }
 
 func controlPlaneReplayPrometheus() string {

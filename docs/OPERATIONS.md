@@ -6,6 +6,7 @@
 - Readiness: `GET /readyz`
 - Metrics: `GET /metrics` (Prometheus text format)
 - Timeline: `GET /timeline` (incident + audit + decision trace feed)
+- Replay history: `GET /v1/ops/controlplane/replay/history?days=7` (daily replay/conflict trend + ledger stats)
 
 ## Hardened Container Run
 
