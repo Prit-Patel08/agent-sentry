@@ -27,7 +27,7 @@ type idempotencyContext struct {
 func beginIdempotentMutation(w http.ResponseWriter, r *http.Request, endpoint string) (*idempotencyContext, bool) {
 	key, err := parseIdempotencyKey(r)
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
+		writeJSONErrorForRequest(w, r, http.StatusBadRequest, err.Error())
 		return nil, true
 	}
 	if key == "" {
@@ -35,14 +35,14 @@ func beginIdempotentMutation(w http.ResponseWriter, r *http.Request, endpoint st
 	}
 	if database.GetDB() == nil {
 		if err := database.InitDB(); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("idempotency database init failed: %v", err))
+			writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("idempotency database init failed: %v", err))
 			return nil, true
 		}
 	}
 
 	requestHash, err := buildRequestHash(r)
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body for idempotency: %v", err))
+		writeJSONErrorForRequest(w, r, http.StatusBadRequest, fmt.Sprintf("invalid request body for idempotency: %v", err))
 		return nil, true
 	}
 
@@ -51,7 +51,7 @@ func beginIdempotentMutation(w http.ResponseWriter, r *http.Request, endpoint st
 		if strings.TrimSpace(record.RequestHash) != requestHash {
 			apiMetrics.IncControlPlaneIdempotencyConflict()
 			_ = database.LogAuditEvent("control-plane", "IDEMPOTENT_CONFLICT", "idempotency key reused with different request payload", "api", 0, endpoint)
-			writeJSONError(w, http.StatusConflict, "idempotency key reused with different request payload")
+			writeJSONErrorForRequest(w, r, http.StatusConflict, "idempotency key reused with different request payload")
 			return nil, true
 		}
 
@@ -63,7 +63,7 @@ func beginIdempotentMutation(w http.ResponseWriter, r *http.Request, endpoint st
 		return nil, true
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("idempotency lookup failed: %v", err))
+		writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("idempotency lookup failed: %v", err))
 		return nil, true
 	}
 
@@ -150,7 +150,11 @@ func writeRawJSON(w http.ResponseWriter, statusCode int, raw string) {
 	if raw == "" {
 		raw = "{}"
 	}
-	w.Header().Set("Content-Type", "application/json")
+	if statusCode >= 400 {
+		w.Header().Set("Content-Type", "application/problem+json")
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+	}
 	w.WriteHeader(statusCode)
 	_, _ = w.Write([]byte(raw))
 	_, _ = w.Write([]byte("\n"))

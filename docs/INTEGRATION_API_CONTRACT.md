@@ -139,11 +139,20 @@ Response:
 
 ## Error Contract
 
+Errors use RFC 7807 Problem Details (`Content-Type: application/problem+json`).
+
 ```json
 {
-  "error": "human-readable error message"
+  "type": "about:blank",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "human-readable error message",
+  "instance": "/v1/integrations/workspaces/ws-123/actions"
 }
 ```
+
+Compatibility note:
+- `error` field is still present with the same value as `detail` for legacy clients.
 
 Common codes:
 - `bad_request`

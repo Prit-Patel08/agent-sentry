@@ -46,6 +46,19 @@ func intValue(v interface{}) int {
 	return int(f)
 }
 
+func problemDetail(payload map[string]interface{}) string {
+	if payload == nil {
+		return ""
+	}
+	if detail, ok := payload["detail"].(string); ok && strings.TrimSpace(detail) != "" {
+		return detail
+	}
+	if legacy, ok := payload["error"].(string); ok {
+		return legacy
+	}
+	return ""
+}
+
 func metricValue(prometheus, metric string) (float64, bool) {
 	prefix := metric + " "
 	for _, line := range strings.Split(prometheus, "\n") {
@@ -1115,14 +1128,26 @@ func TestControlPlaneReplayHistoryEndpointRejectsInvalidDays(t *testing.T) {
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("path %s expected status 400, got %d", path, resp.StatusCode)
 		}
+		if ctype := resp.Header.Get("Content-Type"); !strings.Contains(ctype, "application/problem+json") {
+			t.Fatalf("path %s expected application/problem+json content-type, got %q", path, ctype)
+		}
 
 		var payload map[string]interface{}
 		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 			t.Fatalf("path %s decode error payload: %v", path, err)
 		}
-		errMsg := strings.ToLower(stringValue(payload["error"]))
+		if title := stringValue(payload["title"]); title != "Bad Request" {
+			t.Fatalf("path %s expected title Bad Request, got %q", path, title)
+		}
+		if got := intValue(payload["status"]); got != http.StatusBadRequest {
+			t.Fatalf("path %s expected status field 400, got %d", path, got)
+		}
+		if instance := stringValue(payload["instance"]); instance != "/v1/ops/controlplane/replay/history" {
+			t.Fatalf("path %s expected instance /v1/ops/controlplane/replay/history, got %q", path, instance)
+		}
+		errMsg := strings.ToLower(problemDetail(payload))
 		if !strings.Contains(errMsg, "days must be an integer between 1 and 90") {
-			t.Fatalf("path %s expected days validation error, got %#v", path, payload["error"])
+			t.Fatalf("path %s expected days validation error, got payload=%#v", path, payload)
 		}
 	}
 }
@@ -1181,6 +1206,26 @@ func TestV1ProcessKillAliasRequiresAuth(t *testing.T) {
 	resp := w.Result()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected status 401 Unauthorized, got %d", resp.StatusCode)
+	}
+	if ctype := resp.Header.Get("Content-Type"); !strings.Contains(ctype, "application/problem+json") {
+		t.Fatalf("expected application/problem+json content-type, got %q", ctype)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response payload: %v", err)
+	}
+	if title := stringValue(payload["title"]); title != "Unauthorized" {
+		t.Fatalf("expected title Unauthorized, got %q", title)
+	}
+	if got := intValue(payload["status"]); got != http.StatusUnauthorized {
+		t.Fatalf("expected status field 401, got %d", got)
+	}
+	if instance := stringValue(payload["instance"]); instance != "/v1/process/kill" {
+		t.Fatalf("expected instance /v1/process/kill, got %q", instance)
+	}
+	if detail := strings.ToLower(problemDetail(payload)); !strings.Contains(detail, "authorization required") {
+		t.Fatalf("expected auth-required detail, got payload=%#v", payload)
 	}
 }
 

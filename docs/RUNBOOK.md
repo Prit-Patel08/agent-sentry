@@ -83,7 +83,7 @@ Guardrail:
 Blocked restart response contract:
 - HTTP `429`
 - header: `Retry-After: <seconds>`
-- body: `{"error":"restart budget exceeded: ...","retry_after_seconds":<n>}`
+- body (Problem Details): `{"type":"about:blank","title":"Too Many Requests","status":429,"detail":"restart budget exceeded: ...","instance":"/v1/process/restart","retry_after_seconds":<n>}`
 
 ```bash
 curl -X POST \

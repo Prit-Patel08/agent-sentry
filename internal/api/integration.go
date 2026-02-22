@@ -41,14 +41,14 @@ func HandleIntegrationWorkspaceRegister(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 	if !requireAuth(w, r) {
 		return
 	}
 	if err := ensureAPIDBReady(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("database init failed: %v", err))
+		writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("database init failed: %v", err))
 		return
 	}
 	idemCtx, handled := beginIdempotentMutation(w, r, "POST /v1/integrations/workspaces/register")
@@ -61,7 +61,7 @@ func HandleIntegrationWorkspaceRegister(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, status, payload)
 	}
 	respondErr := func(status int, msg string) {
-		respond(status, map[string]interface{}{"error": msg})
+		respond(status, problemPayload(r, status, msg, nil))
 	}
 
 	var req registerWorkspaceRequest
@@ -112,17 +112,17 @@ func HandleIntegrationWorkspaceScoped(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := ensureAPIDBReady(); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("database init failed: %v", err))
+		writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("database init failed: %v", err))
 		return
 	}
 
 	workspaceID, resource, subresource, err := parseIntegrationWorkspacePath(r.URL.Path)
 	if err != nil {
-		writeJSONError(w, http.StatusNotFound, err.Error())
+		writeJSONErrorForRequest(w, r, http.StatusNotFound, err.Error())
 		return
 	}
 	if !integrationWorkspaceIDPattern.MatchString(workspaceID) {
-		writeJSONError(w, http.StatusBadRequest, "invalid workspace_id")
+		writeJSONErrorForRequest(w, r, http.StatusBadRequest, "invalid workspace_id")
 		return
 	}
 
@@ -136,7 +136,7 @@ func HandleIntegrationWorkspaceScoped(w http.ResponseWriter, r *http.Request) {
 	case resource == "incidents" && subresource == "latest":
 		handleIntegrationWorkspaceLatestIncident(w, r, workspaceID)
 	default:
-		writeJSONError(w, http.StatusNotFound, "integration endpoint not found")
+		writeJSONErrorForRequest(w, r, http.StatusNotFound, "integration endpoint not found")
 	}
 }
 
@@ -163,17 +163,17 @@ func parseIntegrationWorkspacePath(path string) (workspaceID, resource, subresou
 
 func handleIntegrationWorkspaceStatus(w http.ResponseWriter, r *http.Request, workspaceID string) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	ws, err := database.GetIntegrationWorkspace(workspaceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSONError(w, http.StatusNotFound, "workspace not found")
+			writeJSONErrorForRequest(w, r, http.StatusNotFound, "workspace not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("workspace lookup failed: %v", err))
+		writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("workspace lookup failed: %v", err))
 		return
 	}
 
@@ -199,7 +199,7 @@ func handleIntegrationWorkspaceStatus(w http.ResponseWriter, r *http.Request, wo
 
 func handleIntegrationWorkspaceProtection(w http.ResponseWriter, r *http.Request, workspaceID string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 	if !requireAuth(w, r) {
@@ -215,7 +215,7 @@ func handleIntegrationWorkspaceProtection(w http.ResponseWriter, r *http.Request
 		writeJSON(w, status, payload)
 	}
 	respondErr := func(status int, msg string) {
-		respond(status, map[string]interface{}{"error": msg})
+		respond(status, problemPayload(r, status, msg, nil))
 	}
 
 	var req setProtectionRequest
@@ -253,7 +253,7 @@ func handleIntegrationWorkspaceProtection(w http.ResponseWriter, r *http.Request
 
 func handleIntegrationWorkspaceActions(w http.ResponseWriter, r *http.Request, workspaceID string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 	if !requireAuth(w, r) {
@@ -269,7 +269,7 @@ func handleIntegrationWorkspaceActions(w http.ResponseWriter, r *http.Request, w
 		writeJSON(w, status, payload)
 	}
 	respondErr := func(status int, msg string) {
-		respond(status, map[string]interface{}{"error": msg})
+		respond(status, problemPayload(r, status, msg, nil))
 	}
 
 	ws, err := database.GetIntegrationWorkspace(workspaceID)
@@ -314,10 +314,7 @@ func handleIntegrationWorkspaceActions(w http.ResponseWriter, r *http.Request, w
 		msg := lifecycleErrorMessage(reqErr, "failed to request action")
 		if retryAfter := lifecycleRetryAfter(reqErr); retryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-			respond(statusCode, map[string]interface{}{
-				"error":               msg,
-				"retry_after_seconds": retryAfter,
-			})
+			respond(statusCode, problemPayload(r, statusCode, msg, map[string]interface{}{"retry_after_seconds": retryAfter}))
 			return
 		}
 		respondErr(statusCode, msg)
@@ -359,26 +356,26 @@ func handleIntegrationWorkspaceActions(w http.ResponseWriter, r *http.Request, w
 
 func handleIntegrationWorkspaceLatestIncident(w http.ResponseWriter, r *http.Request, workspaceID string) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	if _, err := database.GetIntegrationWorkspace(workspaceID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSONError(w, http.StatusNotFound, "workspace not found")
+			writeJSONErrorForRequest(w, r, http.StatusNotFound, "workspace not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("workspace lookup failed: %v", err))
+		writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("workspace lookup failed: %v", err))
 		return
 	}
 
 	latest, err := database.GetLatestIntegrationIncident(workspaceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSONError(w, http.StatusNotFound, "no incidents found")
+			writeJSONErrorForRequest(w, r, http.StatusNotFound, "no incidents found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("incident lookup failed: %v", err))
+		writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("incident lookup failed: %v", err))
 		return
 	}
 

@@ -93,7 +93,7 @@ func withSecurity(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		if !apiLimiter.allow(clientIP(r.RemoteAddr)) {
-			http.Error(rec, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)
+			writeJSONErrorForRequest(rec, r, http.StatusTooManyRequests, "rate limit exceeded")
 			apiMetrics.IncRequest(r.URL.Path, r.Method, rec.status)
 			return
 		}
@@ -111,7 +111,7 @@ func requireAuth(w http.ResponseWriter, r *http.Request) bool {
 
 	if apiKey == "" {
 		if r.Method == "POST" {
-			http.Error(w, `{"error":"Security Alert: You must set FLOWFORGE_API_KEY environment variable to perform mutations."}`, http.StatusForbidden)
+			writeJSONErrorForRequest(w, r, http.StatusForbidden, "Security Alert: You must set FLOWFORGE_API_KEY environment variable to perform mutations.")
 			return false
 		}
 		return true
@@ -121,10 +121,10 @@ func requireAuth(w http.ResponseWriter, r *http.Request) bool {
 	if !strings.HasPrefix(authHeader, "Bearer ") {
 		apiMetrics.IncAuthFailure()
 		if apiLimiter.addAuthFailure(ip) {
-			http.Error(w, `{"error":"Too many failed auth attempts. Retry later."}`, http.StatusTooManyRequests)
+			writeJSONErrorForRequest(w, r, http.StatusTooManyRequests, "Too many failed auth attempts. Retry later.")
 			return false
 		}
-		http.Error(w, `{"error":"Authorization required"}`, http.StatusUnauthorized)
+		writeJSONErrorForRequest(w, r, http.StatusUnauthorized, "Authorization required")
 		return false
 	}
 
@@ -132,10 +132,10 @@ func requireAuth(w http.ResponseWriter, r *http.Request) bool {
 	if subtle.ConstantTimeCompare([]byte(token), []byte(apiKey)) != 1 {
 		apiMetrics.IncAuthFailure()
 		if apiLimiter.addAuthFailure(ip) {
-			http.Error(w, `{"error":"Too many failed auth attempts. Retry later."}`, http.StatusTooManyRequests)
+			writeJSONErrorForRequest(w, r, http.StatusTooManyRequests, "Too many failed auth attempts. Retry later.")
 			return false
 		}
-		http.Error(w, `{"error":"Invalid API key"}`, http.StatusForbidden)
+		writeJSONErrorForRequest(w, r, http.StatusForbidden, "Invalid API key")
 		return false
 	}
 
@@ -250,7 +250,7 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		writeJSONErrorForRequest(w, r, http.StatusInternalServerError, "Streaming unsupported")
 		return
 	}
 
@@ -279,7 +279,7 @@ func HandleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -294,7 +294,7 @@ func HandleReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -347,7 +347,7 @@ func HandleMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 	st := state.GetState()
@@ -365,7 +365,7 @@ func HandleControlPlaneReplayHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -373,7 +373,7 @@ func HandleControlPlaneReplayHistory(w http.ResponseWriter, r *http.Request) {
 	if rawDays := strings.TrimSpace(r.URL.Query().Get("days")); rawDays != "" {
 		parsedDays, err := strconv.Atoi(rawDays)
 		if err != nil || parsedDays < 1 || parsedDays > 90 {
-			writeJSONError(w, http.StatusBadRequest, "days must be an integer between 1 and 90")
+			writeJSONErrorForRequest(w, r, http.StatusBadRequest, "days must be an integer between 1 and 90")
 			return
 		}
 		days = parsedDays
@@ -381,20 +381,20 @@ func HandleControlPlaneReplayHistory(w http.ResponseWriter, r *http.Request) {
 
 	if database.GetDB() == nil {
 		if err := database.InitDB(); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "Database not initialized")
+			writeJSONErrorForRequest(w, r, http.StatusInternalServerError, "Database not initialized")
 			return
 		}
 	}
 
 	stats, err := database.GetControlPlaneReplayStats()
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to load replay stats: %v", err))
+		writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("failed to load replay stats: %v", err))
 		return
 	}
 
 	points, err := database.GetControlPlaneReplayDailyTrend(days)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("failed to load replay history: %v", err))
+		writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("failed to load replay history: %v", err))
 		return
 	}
 
@@ -452,7 +452,7 @@ func HandleWorkerLifecycle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 	snap := WorkerLifecycleSnapshot()
@@ -477,13 +477,13 @@ func HandleTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	if database.GetDB() == nil {
 		if err := database.InitDB(); err != nil {
-			http.Error(w, "Database not initialized", http.StatusInternalServerError)
+			writeJSONErrorForRequest(w, r, http.StatusInternalServerError, "Database not initialized")
 			return
 		}
 	}
@@ -491,24 +491,24 @@ func HandleTimeline(w http.ResponseWriter, r *http.Request) {
 	if incidentID := strings.TrimSpace(r.URL.Query().Get("incident_id")); incidentID != "" {
 		events, err := database.GetIncidentTimelineByIncidentID(incidentID, 500)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Database error: %v", err), http.StatusInternalServerError)
+			writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("Database error: %v", err))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(events); err != nil {
-			http.Error(w, fmt.Sprintf("Encode error: %v", err), http.StatusInternalServerError)
+			writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("Encode error: %v", err))
 		}
 		return
 	}
 
 	events, err := database.GetTimeline(100)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Database error: %v", err), http.StatusInternalServerError)
+		writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("Database error: %v", err))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(events); err != nil {
-		http.Error(w, fmt.Sprintf("Encode error: %v", err), http.StatusInternalServerError)
+		writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("Encode error: %v", err))
 	}
 }
 
@@ -520,7 +520,7 @@ func HandleIncidents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -528,19 +528,19 @@ func HandleIncidents(w http.ResponseWriter, r *http.Request) {
 
 	if database.GetDB() == nil {
 		if err := database.InitDB(); err != nil {
-			http.Error(w, "Database not initialized", http.StatusInternalServerError)
+			writeJSONErrorForRequest(w, r, http.StatusInternalServerError, "Database not initialized")
 			return
 		}
 	}
 
 	incidents, err := database.GetAllIncidents()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Database error: %v", err), http.StatusInternalServerError)
+		writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("Database error: %v", err))
 		return
 	}
 
 	if err := json.NewEncoder(w).Encode(incidents); err != nil {
-		http.Error(w, fmt.Sprintf("Encode error: %v", err), http.StatusInternalServerError)
+		writeJSONErrorForRequest(w, r, http.StatusInternalServerError, fmt.Sprintf("Encode error: %v", err))
 	}
 }
 
@@ -552,7 +552,7 @@ func HandleProcessKill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -573,9 +573,9 @@ func HandleProcessKill(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		statusCode := lifecycleHTTPCode(err, http.StatusInternalServerError)
 		msg := lifecycleErrorMessage(err, "failed to request kill")
-		payload := map[string]interface{}{"error": msg}
+		payload := problemPayload(r, statusCode, msg, nil)
 		persistIdempotentMutation(idemCtx, statusCode, payload)
-		writeJSON(w, statusCode, payload)
+		writeProblem(w, statusCode, payload)
 		return
 	}
 
@@ -602,7 +602,7 @@ func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSONErrorForRequest(w, r, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -630,17 +630,14 @@ func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 		}
 		if retryAfter := lifecycleRetryAfter(err); retryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-			payload := map[string]interface{}{
-				"error":               msg,
-				"retry_after_seconds": retryAfter,
-			}
+			payload := problemPayload(r, statusCode, msg, map[string]interface{}{"retry_after_seconds": retryAfter})
 			persistIdempotentMutation(idemCtx, statusCode, payload)
-			writeJSON(w, statusCode, payload)
+			writeProblem(w, statusCode, payload)
 			return
 		}
-		payload := map[string]interface{}{"error": msg}
+		payload := problemPayload(r, statusCode, msg, nil)
 		persistIdempotentMutation(idemCtx, statusCode, payload)
-		writeJSON(w, statusCode, payload)
+		writeProblem(w, statusCode, payload)
 		return
 	}
 
@@ -693,8 +690,41 @@ func writeJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
 	}
 }
 
-func writeJSONError(w http.ResponseWriter, statusCode int, msg string) {
-	writeJSON(w, statusCode, map[string]string{"error": msg})
+func problemPayload(r *http.Request, statusCode int, detail string, extra map[string]interface{}) map[string]interface{} {
+	payload := map[string]interface{}{
+		"type":   "about:blank",
+		"title":  http.StatusText(statusCode),
+		"status": statusCode,
+	}
+	if payload["title"] == "" {
+		payload["title"] = "Error"
+	}
+	if detail != "" {
+		payload["detail"] = detail
+		// Compatibility field for existing clients and scripts.
+		payload["error"] = detail
+	}
+	if r != nil && r.URL != nil {
+		if instance := strings.TrimSpace(r.URL.Path); instance != "" {
+			payload["instance"] = instance
+		}
+	}
+	for k, v := range extra {
+		payload[k] = v
+	}
+	return payload
+}
+
+func writeProblem(w http.ResponseWriter, statusCode int, payload map[string]interface{}) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(statusCode)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		log.Printf("[API] encode problem response failed: %v", err)
+	}
+}
+
+func writeJSONErrorForRequest(w http.ResponseWriter, r *http.Request, statusCode int, msg string) {
+	writeProblem(w, statusCode, problemPayload(r, statusCode, msg, nil))
 }
 
 func mutationReason(r *http.Request) string {

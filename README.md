@@ -127,6 +127,7 @@ Legacy non-versioned aliases remain available (`/healthz`, `/readyz`, `/incident
 `/timeline` now includes `lifecycle` events with structured `evidence` payload for transition forensics.
 /readyz returns structured readiness checks and can enforce cloud dependency health when `FLOWFORGE_CLOUD_DEPS_REQUIRED=1`.
 Integration write endpoints require `FLOWFORGE_API_KEY`; workspace registration requires absolute `workspace_path`.
+Error responses use RFC 7807 Problem Details (`application/problem+json`) and keep legacy `error` for compatibility.
 
 `/metrics` now includes lifecycle SLO/latency metrics:
 - `flowforge_stop_slo_compliance_ratio`

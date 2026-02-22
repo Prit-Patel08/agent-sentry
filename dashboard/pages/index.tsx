@@ -17,15 +17,28 @@ import { ShieldAlert, Zap, Activity, ServerCrash, Terminal, Cpu, Skull, RefreshC
 import { useEffect, useState } from 'react';
 
 const API_BASE = process.env.NEXT_PUBLIC_FLOWFORGE_API_BASE || 'http://127.0.0.1:8080';
+
+const readAPIErrorMessage = (payload: unknown, status: number): string => {
+  if (!payload || typeof payload !== 'object') {
+    return `Request failed (${status})`;
+  }
+  const p = payload as Record<string, unknown>;
+  const detail = typeof p.detail === 'string' ? p.detail.trim() : '';
+  if (detail) return detail;
+  const legacy = typeof p.error === 'string' ? p.error.trim() : '';
+  if (legacy) return legacy;
+  const title = typeof p.title === 'string' ? p.title.trim() : '';
+  if (title) return `${title} (${status})`;
+  return `Request failed (${status})`;
+};
+
 const fetchJSON = async (url: string): Promise<unknown> => {
   const res = await fetch(url);
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
     try {
       const payload = await res.json();
-      if (payload?.error) {
-        message = String(payload.error);
-      }
+      message = readAPIErrorMessage(payload, res.status);
     } catch {
       // keep default message
     }
@@ -454,12 +467,13 @@ export default function Dashboard() {
                               headers['Authorization'] = `Bearer ${apiKey}`;
                             }
                             const res = await fetch(`${API_BASE}/v1/process/kill`, { method: 'POST', headers });
-                            const data = await res.json().catch(() => ({} as { error?: string; pid?: number }));
+                            const data = await res.json().catch(() => ({} as Record<string, unknown>));
                             if (!res.ok) {
-                              throw new Error(data.error || `Request failed (${res.status})`);
+                              throw new Error(readAPIErrorMessage(data, res.status));
                             }
                             setKillStatusIsError(false);
-                            setKillStatus(`Stop requested for PID ${data.pid ?? liveStats.pid}`);
+                            const pid = typeof data.pid === 'number' ? data.pid : liveStats.pid;
+                            setKillStatus(`Stop requested for PID ${pid}`);
                             setKillConfirm(false);
                             mutate(`${API_BASE}/v1/incidents`);
                             setTimeout(() => setKillStatus(null), 3000);
@@ -615,15 +629,17 @@ export default function Dashboard() {
                             headers,
                             body: JSON.stringify({ reason: 'dashboard manual restart' })
                           });
-                          const data = await res.json().catch(() => ({} as { error?: string; retry_after_seconds?: number; lifecycle?: string }));
+                          const data = await res.json().catch(() => ({} as Record<string, unknown>));
                           if (!res.ok) {
-                            const retryHint = typeof data.retry_after_seconds === 'number' && data.retry_after_seconds > 0
-                              ? ` Retry in ${Math.round(data.retry_after_seconds)}s.`
+                            const retryAfterSeconds = typeof data.retry_after_seconds === 'number' ? data.retry_after_seconds : 0;
+                            const retryHint = retryAfterSeconds > 0
+                              ? ` Retry in ${Math.round(retryAfterSeconds)}s.`
                               : '';
-                            throw new Error((data.error || `Request failed (${res.status})`) + retryHint);
+                            throw new Error(readAPIErrorMessage(data, res.status) + retryHint);
                           }
                           setRestartStatusIsError(false);
-                          setRestartStatus(`Restart requested${data.lifecycle ? ` (${data.lifecycle})` : ''}`);
+                          const lifecycle = typeof data.lifecycle === 'string' ? data.lifecycle : '';
+                          setRestartStatus(`Restart requested${lifecycle ? ` (${lifecycle})` : ''}`);
                           mutate(`${API_BASE}/v1/worker/lifecycle`);
                           mutate(`${API_BASE}/v1/timeline`);
                           setTimeout(() => setRestartStatus(null), 5000);
