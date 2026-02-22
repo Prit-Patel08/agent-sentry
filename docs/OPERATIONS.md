@@ -72,6 +72,7 @@ Equivalent make shortcuts:
 
 ```bash
 make doctor
+make doctor-summary
 make contracts
 make precommit
 ```

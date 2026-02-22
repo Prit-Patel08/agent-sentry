@@ -161,6 +161,12 @@ Strict toolchain profile (matches CI expectations):
 make doctor-strict
 ```
 
+Generate a local tooling summary artifact:
+
+```bash
+make doctor-summary
+```
+
 One-command local gate:
 
 ```bash
@@ -189,6 +195,7 @@ If `govulncheck` reports Go standard library advisories, upgrade your local Go p
 Release checkpoint contract tests: `./scripts/release_checkpoint_contract_test.sh`.
 CI also enforces `shellcheck` for `scripts/*.sh`.
 CI also runs `tooling_doctor.sh --strict`.
+CI uploads tooling doctor summary artifact (`tooling-doctor/summary.tsv`).
 ShellCheck policy is pinned in repo at `.shellcheckrc`.
 Run local toolchain diagnostics: `./scripts/tooling_doctor.sh` (or `--strict`).
 Fast local pre-commit checks: `./scripts/precommit_checks.sh`.

@@ -59,7 +59,14 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Run tooling doctor (strict)
-        run: ./scripts/tooling_doctor.sh --strict
+        run: ./scripts/tooling_doctor.sh --strict --summary-file ci_artifacts/tooling/summary.tsv
+
+      - name: Upload tooling doctor artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tooling-doctor
+          path: ci_artifacts/tooling
 
   release-checkpoint-contract:
     runs-on: ubuntu-latest

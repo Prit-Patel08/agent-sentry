@@ -3,26 +3,40 @@
 set -euo pipefail
 
 STRICT_MODE=0
+SUMMARY_FILE=""
 
 usage() {
   cat <<EOF
 Usage: ./scripts/tooling_doctor.sh [options]
 
 Options:
-  --strict    Treat missing optional tools as failures.
-  -h, --help  Show this help text.
+  --strict               Treat missing optional tools as failures.
+  --summary-file <path>  Write tab-separated tool summary report.
+  -h, --help             Show this help text.
 EOF
 }
 
-for arg in "$@"; do
-  case "$arg" in
-    --strict) STRICT_MODE=1 ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --strict)
+      STRICT_MODE=1
+      shift
+      ;;
+    --summary-file)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --summary-file requires a path argument." >&2
+        usage >&2
+        exit 1
+      fi
+      SUMMARY_FILE="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
       ;;
     *)
-      echo "Unknown argument: $arg" >&2
+      echo "Unknown argument: $1" >&2
       usage >&2
       exit 1
       ;;
@@ -37,6 +51,22 @@ echo "Root: $ROOT_DIR"
 echo "Strict mode: $STRICT_MODE"
 
 status=0
+summary_rows=()
+
+sanitize_summary_field() {
+  local raw="$1"
+  raw="${raw//$'\t'/ }"
+  raw="${raw//$'\n'/ }"
+  raw="${raw//$'\r'/ }"
+  printf "%s" "$raw"
+}
+
+record_summary() {
+  local tool="$1"
+  local tool_status="$2"
+  local detail="$3"
+  summary_rows+=("$(sanitize_summary_field "$tool")"$'\t'"$(sanitize_summary_field "$tool_status")"$'\t'"$(sanitize_summary_field "$detail")")
+}
 
 resolve_tool() {
   local name="$1"
@@ -61,18 +91,21 @@ print_ok() {
   local name="$1"
   local version="$2"
   echo "PASS: $name ($version)"
+  record_summary "$name" "PASS" "$version"
 }
 
 print_warn() {
   local name="$1"
   local hint="$2"
   echo "WARN: $name missing. $hint"
+  record_summary "$name" "WARN" "$hint"
 }
 
 print_fail() {
   local name="$1"
   local hint="$2"
   echo "FAIL: $name missing. $hint" >&2
+  record_summary "$name" "FAIL" "$hint"
   status=1
 }
 
@@ -113,6 +146,17 @@ check_tool "docker" "optional" "--version" "Install Docker Desktop for container
 check_tool "shellcheck" "optional" "--version" "Install shellcheck to lint scripts locally."
 check_tool "staticcheck" "optional" "-version" "Install with: go install honnef.co/go/tools/cmd/staticcheck@latest"
 check_tool "govulncheck" "optional" "-version" "Install with: go install golang.org/x/vuln/cmd/govulncheck@latest"
+
+if [[ -n "$SUMMARY_FILE" ]]; then
+  mkdir -p "$(dirname "$SUMMARY_FILE")"
+  {
+    printf "tool\tstatus\tdetail\n"
+    for row in "${summary_rows[@]}"; do
+      printf "%s\n" "$row"
+    done
+  } > "$SUMMARY_FILE"
+  echo "Summary written: $SUMMARY_FILE"
+fi
 
 if [[ "$status" -ne 0 ]]; then
   echo "❌ Tooling doctor found blocking issues." >&2

@@ -1,10 +1,11 @@
 SHELL := /bin/bash
 
-.PHONY: help doctor doctor-strict contracts precommit hook hook-strict
+.PHONY: help doctor doctor-summary doctor-strict contracts precommit hook hook-strict
 
 help:
 	@echo "FlowForge developer shortcuts:"
 	@echo "  make doctor         - run tooling diagnostics (warn profile)"
+	@echo "  make doctor-summary - run tooling diagnostics and write summary report"
 	@echo "  make doctor-strict  - run tooling diagnostics (strict profile)"
 	@echo "  make contracts      - run contract test scripts"
 	@echo "  make precommit      - run local pre-commit checks"
@@ -13,6 +14,11 @@ help:
 
 doctor:
 	./scripts/tooling_doctor.sh
+
+doctor-summary:
+	mkdir -p pilot_artifacts/tooling
+	./scripts/tooling_doctor.sh --summary-file pilot_artifacts/tooling/latest.tsv
+	@echo "Summary: pilot_artifacts/tooling/latest.tsv"
 
 doctor-strict:
 	./scripts/tooling_doctor.sh --strict
