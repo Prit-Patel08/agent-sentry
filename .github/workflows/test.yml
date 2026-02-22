@@ -200,6 +200,58 @@ jobs:
           name: smoke-gate
           path: ci_artifacts/smoke
 
+  replay-drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [backend]
+    env:
+      FLOWFORGE_API_KEY: ci-replay-drill-key
+      FLOWFORGE_DB_PATH: ci_artifacts/replay-drill/flowforge.db
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.7"
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Build FlowForge binary
+        run: go build -o flowforge .
+
+      - name: Run live control-plane replay drill
+        run: |
+          mkdir -p ci_artifacts/replay-drill
+          ./flowforge dashboard >ci_artifacts/replay-drill/dashboard.log 2>&1 &
+          api_pid=$!
+          cleanup() {
+            kill "$api_pid" >/dev/null 2>&1 || true
+            wait "$api_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+              break
+            fi
+            sleep 0.25
+          done
+          curl -fsS http://127.0.0.1:8080/healthz >/dev/null
+
+          ./scripts/controlplane_replay_drill.sh \
+            --api-key "$FLOWFORGE_API_KEY" \
+            --out ci_artifacts/replay-drill/artifacts
+
+      - name: Upload replay drill artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-drill
+          path: ci_artifacts/replay-drill
+
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 20

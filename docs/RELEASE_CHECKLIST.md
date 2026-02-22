@@ -12,7 +12,7 @@ Use this checklist before tagging any release.
 - [ ] If `FLOWFORGE_RUN_CONTROLPLANE_REPLAY_RETENTION=1`, retention artifact status is `PASS` or `SKIPPED`.
 - [ ] Signed evidence bundle exported: `go run . evidence export --out-dir <release-artifact-dir>/evidence`.
 - [ ] Signed evidence bundle verified: `go run . evidence verify --bundle-dir <release-artifact-dir>/evidence`.
-- [ ] CI checks on `main` are green (`shellcheck`, `release-checkpoint-contract`, `backend` [build/test/race/vet/staticcheck/govulncheck], `dashboard`, `smoke`, `docker`, `sbom`).
+- [ ] CI checks on `main` are green (`shellcheck`, `release-checkpoint-contract`, `backend` [build/test/race/vet/staticcheck/govulncheck], `dashboard`, `smoke`, `replay-drill`, `docker`, `sbom`).
 - [ ] No tracked secret/runtime artifacts in git index.
 - [ ] No unresolved high-severity security findings.
 

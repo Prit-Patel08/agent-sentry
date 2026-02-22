@@ -221,6 +221,7 @@ Replay retention contract tests: `./scripts/controlplane_replay_retention_contra
 Tooling doctor contract tests: `./scripts/tooling_doctor_contract_test.sh`.
 CI also enforces `shellcheck` for `scripts/*.sh`.
 CI also runs `tooling_doctor.sh --strict`.
+CI runs a live replay drill gate (`replay-drill`) using `controlplane_replay_drill.sh` and uploads drill artifacts.
 CI uploads tooling doctor summary artifact (`tooling-doctor/summary.tsv`).
 ShellCheck policy is pinned in repo at `.shellcheckrc`.
 Run local toolchain diagnostics: `./scripts/tooling_doctor.sh` (or `--strict`).

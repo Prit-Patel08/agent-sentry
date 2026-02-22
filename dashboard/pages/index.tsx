@@ -92,7 +92,14 @@ interface LifecycleSLO {
   stopLastSeconds: number;
   restartLastSeconds: number;
   restartBudgetBlocks: number;
+  idempotencyConflicts: number;
+  idempotencyReplays: number;
+  replayRows: number;
+  replayOldestAgeSeconds: number;
+  replayStatsError: number;
 }
+
+const REPLAY_ROW_CAP_TARGET = 50000;
 
 export default function Dashboard() {
   const router = useRouter();
@@ -136,7 +143,12 @@ export default function Dashboard() {
         restartComplianceRatio: metrics.flowforge_restart_slo_compliance_ratio ?? 0,
         stopLastSeconds: metrics.flowforge_stop_latency_last_seconds ?? 0,
         restartLastSeconds: metrics.flowforge_restart_latency_last_seconds ?? 0,
-        restartBudgetBlocks: metrics.flowforge_restart_budget_block_total ?? 0
+        restartBudgetBlocks: metrics.flowforge_restart_budget_block_total ?? 0,
+        idempotencyConflicts: metrics.flowforge_controlplane_idempotency_conflict_total ?? 0,
+        idempotencyReplays: metrics.flowforge_controlplane_idempotent_replay_total ?? 0,
+        replayRows: metrics.flowforge_controlplane_replay_rows ?? 0,
+        replayOldestAgeSeconds: metrics.flowforge_controlplane_replay_oldest_age_seconds ?? 0,
+        replayStatsError: metrics.flowforge_controlplane_replay_stats_error ?? 0
       };
     },
     {
@@ -148,7 +160,12 @@ export default function Dashboard() {
         restartComplianceRatio: 0,
         stopLastSeconds: 0,
         restartLastSeconds: 0,
-        restartBudgetBlocks: 0
+        restartBudgetBlocks: 0,
+        idempotencyConflicts: 0,
+        idempotencyReplays: 0,
+        replayRows: 0,
+        replayOldestAgeSeconds: 0,
+        replayStatsError: 0
       }
     }
   );
@@ -274,6 +291,13 @@ export default function Dashboard() {
     confidence >= 85 ? 'High certainty'
     : confidence >= 65 ? 'Medium certainty'
     : 'Low certainty';
+  const replayOldestAgeHours = (lifecycleSLO?.replayOldestAgeSeconds ?? 0) / 3600;
+  const sloOnTrack =
+    (lifecycleSLO?.stopComplianceRatio ?? 0) >= 0.95 &&
+    (lifecycleSLO?.restartComplianceRatio ?? 0) >= 0.95 &&
+    (lifecycleSLO?.idempotencyConflicts ?? 0) <= 0 &&
+    (lifecycleSLO?.replayRows ?? 0) <= REPLAY_ROW_CAP_TARGET &&
+    (lifecycleSLO?.replayStatsError ?? 0) === 0;
   const actionSummary =
     latestActionedIncident?.exit_reason === 'LOOP_DETECTED'
       ? 'FlowForge stopped the process to prevent runaway cost.'
@@ -588,11 +612,11 @@ export default function Dashboard() {
                 <div className="mb-3 flex items-center justify-between">
                   <h3 className="text-sm font-semibold tracking-wide text-gray-200">Lifecycle SLO</h3>
                   <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                    (lifecycleSLO?.stopComplianceRatio ?? 0) >= 0.95 && (lifecycleSLO?.restartComplianceRatio ?? 0) >= 0.95
+                    sloOnTrack
                       ? 'bg-green-500/20 text-green-300 border border-green-500/30'
                       : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                   }`}>
-                    {(lifecycleSLO?.stopComplianceRatio ?? 0) >= 0.95 && (lifecycleSLO?.restartComplianceRatio ?? 0) >= 0.95 ? 'ON TRACK' : 'AT RISK'}
+                    {sloOnTrack ? 'ON TRACK' : 'AT RISK'}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-xs">
@@ -614,10 +638,31 @@ export default function Dashboard() {
                     <p className="text-gray-500">Last Restart Latency</p>
                     <p className="font-mono text-gray-200">{(lifecycleSLO?.restartLastSeconds ?? 0).toFixed(3)}s</p>
                   </div>
+                  <div className="rounded-md bg-black/20 p-2">
+                    <p className="text-gray-500">Replay Ledger Rows</p>
+                    <p className="font-mono text-gray-200">{Math.round(lifecycleSLO?.replayRows ?? 0)}</p>
+                    <p className="text-[11px] text-gray-500">target ≤ {REPLAY_ROW_CAP_TARGET}</p>
+                  </div>
+                  <div className="rounded-md bg-black/20 p-2">
+                    <p className="text-gray-500">Oldest Replay Age</p>
+                    <p className="font-mono text-gray-200">{replayOldestAgeHours.toFixed(2)}h</p>
+                  </div>
                 </div>
-                <div className="mt-3 rounded-md bg-black/20 p-2 text-xs">
-                  <p className="text-gray-500">Restart Budget Blocks (process lifetime)</p>
-                  <p className="font-mono text-gray-200">{Math.round(lifecycleSLO?.restartBudgetBlocks ?? 0)}</p>
+                <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
+                  <div className="rounded-md bg-black/20 p-2">
+                    <p className="text-gray-500">Restart Budget Blocks</p>
+                    <p className="font-mono text-gray-200">{Math.round(lifecycleSLO?.restartBudgetBlocks ?? 0)}</p>
+                  </div>
+                  <div className="rounded-md bg-black/20 p-2">
+                    <p className="text-gray-500">Idempotency Conflicts</p>
+                    <p className={`font-mono ${(lifecycleSLO?.idempotencyConflicts ?? 0) > 0 ? 'text-amber-300' : 'text-gray-200'}`}>
+                      {Math.round(lifecycleSLO?.idempotencyConflicts ?? 0)}
+                    </p>
+                  </div>
+                  <div className="rounded-md bg-black/20 p-2">
+                    <p className="text-gray-500">Idempotent Replays</p>
+                    <p className="font-mono text-gray-200">{Math.round(lifecycleSLO?.idempotencyReplays ?? 0)}</p>
+                  </div>
                 </div>
               </div>
               <TimelinePanel
