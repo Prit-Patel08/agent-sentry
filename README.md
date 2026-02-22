@@ -311,6 +311,7 @@ export FLOWFORGE_RESTART_BUDGET_WINDOW_SECONDS=300
 - run pilot pack: `./scripts/week1_pilot.sh`
 - run threshold tuning: `./scripts/tune_detection.sh`
 - run recovery drill: `./scripts/recovery_drill.sh`
+- run control-plane replay drill: `./scripts/controlplane_replay_drill.sh`
 - run release checkpoint: `./scripts/release_checkpoint.sh`
 
 ## Week 2 Ops

@@ -57,6 +57,10 @@ Output directory default:
 2. Latest event age (data freshness):
 - target: `<= 300s`
 
+3. Idempotency conflict events:
+- target: `0`
+- source: weekly `audit` events with title `IDEMPOTENT_CONFLICT`
+
 ## Weekly Ritual (Mandatory)
 
 Cadence:
@@ -79,6 +83,12 @@ Procedure:
 4. Assign top 3 reliability actions with owner + due date.
 5. Publish decision (`GREEN`, `YELLOW`, `RED`) in the weekly notes.
 6. Link output artifact path in tracking docs/issues.
+
+Monthly reliability drill for control-plane replay contract:
+
+```bash
+./scripts/controlplane_replay_drill.sh
+```
 
 ## Error-Budget Decision Policy
 

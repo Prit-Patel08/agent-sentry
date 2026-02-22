@@ -19,6 +19,14 @@ All write endpoints require:
 
 Read-only status endpoints may be open locally in MVP, but write endpoints must remain protected.
 
+Optional for safe retries:
+
+- `Idempotency-Key: <client-generated-key>`
+
+When provided on write endpoints (`register`, `protection`, `actions`):
+1. same key + same payload replays the original response with `X-Idempotent-Replay: true`
+2. same key + different payload returns `409` with an idempotency conflict error
+
 ## Base URL
 
 `http://127.0.0.1:8080` (existing API in MVP)  
@@ -133,10 +141,7 @@ Response:
 
 ```json
 {
-  "error": {
-    "code": "unauthorized",
-    "message": "invalid or missing api key"
-  }
+  "error": "human-readable error message"
 }
 ```
 
@@ -162,3 +167,4 @@ Common codes:
 - absolute `workspace_path`
 4. `actions` supports `kill` and `restart` and persists integration action records with linked audit events.
 5. `incidents/latest` currently returns the latest supervisor incident in local runtime context.
+6. Idempotent mutation replay state is persisted in `control_plane_replays` for cross-request replay safety.

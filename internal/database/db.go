@@ -335,6 +335,25 @@ func InitDB() error {
 		return err
 	}
 
+	createControlPlaneReplaysTableSQL := `CREATE TABLE IF NOT EXISTS control_plane_replays (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		idempotency_key TEXT NOT NULL,
+		endpoint TEXT NOT NULL,
+		request_hash TEXT NOT NULL,
+		response_status INTEGER NOT NULL,
+		response_body TEXT NOT NULL,
+		replay_count INTEGER NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(idempotency_key, endpoint)
+	);`
+	if _, err := db.Exec(createControlPlaneReplaysTableSQL); err != nil {
+		return err
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_control_plane_replays_last_seen ON control_plane_replays(last_seen_at DESC);"); err != nil {
+		return err
+	}
+
 	return nil
 }
 

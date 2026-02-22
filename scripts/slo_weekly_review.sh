@@ -131,6 +131,20 @@ AUDIT_EVENTS="$(sql_scalar "SELECT COUNT(*) FROM events WHERE ${EVENT_TIME_COL} 
 POLICY_DRY_RUN_EVENTS="$(sql_scalar "SELECT COUNT(*) FROM events WHERE ${EVENT_TIME_COL} >= datetime('now', '${WINDOW}') AND event_type='policy_dry_run';")"
 DISTINCT_INCIDENTS="$(sql_scalar "SELECT COUNT(DISTINCT incident_id) FROM events WHERE ${EVENT_TIME_COL} >= datetime('now', '${WINDOW}') AND incident_id IS NOT NULL AND incident_id != '';")"
 
+IDEMPOTENT_REPLAY_EVENTS="$(sql_scalar "
+SELECT COUNT(*) FROM events
+WHERE ${EVENT_TIME_COL} >= datetime('now', '${WINDOW}')
+  AND event_type='audit'
+  AND UPPER(title)='IDEMPOTENT_REPLAY';
+")"
+
+IDEMPOTENT_CONFLICT_EVENTS="$(sql_scalar "
+SELECT COUNT(*) FROM events
+WHERE ${EVENT_TIME_COL} >= datetime('now', '${WINDOW}')
+  AND event_type='audit'
+  AND UPPER(title)='IDEMPOTENT_CONFLICT';
+")"
+
 DESTRUCTIVE_ACTIONS="$(sql_scalar "
 SELECT COUNT(*) FROM events
 WHERE ${EVENT_TIME_COL} >= datetime('now', '${WINDOW}')
@@ -300,13 +314,19 @@ FROM events;
 UPTIME_SECONDS="N/A"
 KILL_TOTAL="N/A"
 RESTART_TOTAL="N/A"
+IDEMPOTENT_REPLAY_TOTAL="N/A"
+IDEMPOTENT_CONFLICT_TOTAL="N/A"
 if [[ -f "$OUT_DIR/metrics.prom" ]]; then
   UPTIME_SECONDS="$(awk '/^flowforge_uptime_seconds /{print $2}' "$OUT_DIR/metrics.prom" | tail -n1)"
   KILL_TOTAL="$(awk '/^flowforge_process_kill_total /{print $2}' "$OUT_DIR/metrics.prom" | tail -n1)"
   RESTART_TOTAL="$(awk '/^flowforge_process_restart_total /{print $2}' "$OUT_DIR/metrics.prom" | tail -n1)"
+  IDEMPOTENT_REPLAY_TOTAL="$(awk '/^flowforge_controlplane_idempotent_replay_total /{print $2}' "$OUT_DIR/metrics.prom" | tail -n1)"
+  IDEMPOTENT_CONFLICT_TOTAL="$(awk '/^flowforge_controlplane_idempotency_conflict_total /{print $2}' "$OUT_DIR/metrics.prom" | tail -n1)"
   UPTIME_SECONDS="${UPTIME_SECONDS:-N/A}"
   KILL_TOTAL="${KILL_TOTAL:-N/A}"
   RESTART_TOTAL="${RESTART_TOTAL:-N/A}"
+  IDEMPOTENT_REPLAY_TOTAL="${IDEMPOTENT_REPLAY_TOTAL:-N/A}"
+  IDEMPOTENT_CONFLICT_TOTAL="${IDEMPOTENT_CONFLICT_TOTAL:-N/A}"
 fi
 
 slo_a_latency_status="NO_DATA"
@@ -314,6 +334,7 @@ slo_a_precision_status="NO_DATA"
 slo_b_storm_status="PASS"
 slo_c_api_status="FAIL"
 slo_c_freshness_status="NO_DATA"
+slo_c_idempotency_status="PASS"
 
 if [[ "$LATENCY_SAMPLE_COUNT" -gt 0 ]]; then
   if num_le "$LATENCY_P95" "15"; then
@@ -347,13 +368,18 @@ if [[ "$LATEST_EVENT_AGE_SECONDS" -ge 0 ]]; then
   fi
 fi
 
+if [[ "$IDEMPOTENT_CONFLICT_EVENTS" -gt 0 ]]; then
+  slo_c_idempotency_status="FAIL"
+fi
+
 fail_count=0
 for st in \
   "$slo_a_latency_status" \
   "$slo_a_precision_status" \
   "$slo_b_storm_status" \
   "$slo_c_api_status" \
-  "$slo_c_freshness_status"; do
+  "$slo_c_freshness_status" \
+  "$slo_c_idempotency_status"; do
   if [[ "$st" == "FAIL" ]]; then
     fail_count=$((fail_count + 1))
   fi
@@ -377,6 +403,8 @@ decision_events	${DECISION_EVENTS}
 audit_events	${AUDIT_EVENTS}
 policy_dry_run_events	${POLICY_DRY_RUN_EVENTS}
 distinct_incidents	${DISTINCT_INCIDENTS}
+idempotent_replay_events	${IDEMPOTENT_REPLAY_EVENTS}
+idempotent_conflict_events	${IDEMPOTENT_CONFLICT_EVENTS}
 destructive_actions	${DESTRUCTIVE_ACTIONS}
 action_incidents	${ACTION_INCIDENTS}
 low_confidence_action_incidents	${LOW_CONFIDENCE_ACTION_INCIDENTS}
@@ -387,6 +415,9 @@ latency_avg_seconds	${LATENCY_AVG}
 restart_storm_violations	${RESTART_STORM_VIOLATIONS}
 latest_event_age_seconds	${LATEST_EVENT_AGE_SECONDS}
 probe_failures	${probe_failures}
+controlplane_idempotent_replay_total	${IDEMPOTENT_REPLAY_TOTAL}
+controlplane_idempotency_conflict_total	${IDEMPOTENT_CONFLICT_TOTAL}
+slo_c_idempotency_status	${slo_c_idempotency_status}
 error_budget_status	${ERROR_BUDGET_STATUS}
 EOF
 
@@ -407,6 +438,7 @@ cat >"$OUT_DIR/slo_weekly_report.md" <<EOF
 | Restart-storm 10m bucket violations | 0 | ${RESTART_STORM_VIOLATIONS} | ${slo_b_storm_status} |
 | API probe failures (\`/healthz,/readyz,/metrics,/timeline\`) | 0 | ${probe_failures} | ${slo_c_api_status} |
 | Latest event age | <= 300s | ${LATEST_EVENT_AGE_SECONDS}s | ${slo_c_freshness_status} |
+| Idempotency conflict events | 0 | ${IDEMPOTENT_CONFLICT_EVENTS} | ${slo_c_idempotency_status} |
 
 ## Error Budget Decision
 
@@ -421,6 +453,8 @@ Policy:
 
 - Total events: ${TOTAL_EVENTS}
 - Distinct incidents: ${DISTINCT_INCIDENTS}
+- Idempotent replay events: ${IDEMPOTENT_REPLAY_EVENTS}
+- Idempotent conflict events: ${IDEMPOTENT_CONFLICT_EVENTS}
 - Incident events: ${INCIDENT_EVENTS}
 - Decision events: ${DECISION_EVENTS}
 - Audit events: ${AUDIT_EVENTS}
@@ -431,6 +465,8 @@ Policy:
 - FlowForge uptime (probe time): ${UPTIME_SECONDS}
 - Process kill total (probe time): ${KILL_TOTAL}
 - Process restart total (probe time): ${RESTART_TOTAL}
+- Control-plane replay total (probe time): ${IDEMPOTENT_REPLAY_TOTAL}
+- Control-plane conflict total (probe time): ${IDEMPOTENT_CONFLICT_TOTAL}
 
 ## Weekly Ritual Checklist
 

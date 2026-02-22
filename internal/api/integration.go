@@ -51,21 +51,33 @@ func HandleIntegrationWorkspaceRegister(w http.ResponseWriter, r *http.Request) 
 		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("database init failed: %v", err))
 		return
 	}
+	idemCtx, handled := beginIdempotentMutation(w, r, "POST /v1/integrations/workspaces/register")
+	if handled {
+		return
+	}
+
+	respond := func(status int, payload map[string]interface{}) {
+		persistIdempotentMutation(idemCtx, status, payload)
+		writeJSON(w, status, payload)
+	}
+	respondErr := func(status int, msg string) {
+		respond(status, map[string]interface{}{"error": msg})
+	}
 
 	var req registerWorkspaceRequest
 	if err := decodeJSONBody(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
+		respondErr(http.StatusBadRequest, err.Error())
 		return
 	}
 
 	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
 	if !integrationWorkspaceIDPattern.MatchString(req.WorkspaceID) {
-		writeJSONError(w, http.StatusBadRequest, "workspace_id must match [A-Za-z0-9._:-] and be <= 128 chars")
+		respondErr(http.StatusBadRequest, "workspace_id must match [A-Za-z0-9._:-] and be <= 128 chars")
 		return
 	}
 	req.WorkspacePath = strings.TrimSpace(req.WorkspacePath)
 	if req.WorkspacePath == "" || !filepath.IsAbs(req.WorkspacePath) {
-		writeJSONError(w, http.StatusBadRequest, "workspace_path must be an absolute path")
+		respondErr(http.StatusBadRequest, "workspace_path must be an absolute path")
 		return
 	}
 	req.Profile = strings.TrimSpace(req.Profile)
@@ -79,14 +91,14 @@ func HandleIntegrationWorkspaceRegister(w http.ResponseWriter, r *http.Request) 
 
 	ws, err := database.UpsertIntegrationWorkspace(req.WorkspaceID, req.WorkspacePath, req.Profile, req.Client)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("workspace register failed: %v", err))
+		respondErr(http.StatusInternalServerError, fmt.Sprintf("workspace register failed: %v", err))
 		return
 	}
 
 	reason := fmt.Sprintf("workspace registered via integration API: %s", ws.WorkspaceID)
 	_, _ = database.LogAuditEventWithIncidentAndID(actorFromRequest(r), "WORKSPACE_REGISTER", reason, "integration", state.GetState().PID, ws.WorkspacePath, "")
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	respond(http.StatusOK, map[string]interface{}{
 		"ok":           true,
 		"workspace_id": ws.WorkspaceID,
 		"profile":      ws.Profile,
@@ -193,24 +205,36 @@ func handleIntegrationWorkspaceProtection(w http.ResponseWriter, r *http.Request
 	if !requireAuth(w, r) {
 		return
 	}
+	idemCtx, handled := beginIdempotentMutation(w, r, fmt.Sprintf("POST /v1/integrations/workspaces/%s/protection", workspaceID))
+	if handled {
+		return
+	}
+
+	respond := func(status int, payload map[string]interface{}) {
+		persistIdempotentMutation(idemCtx, status, payload)
+		writeJSON(w, status, payload)
+	}
+	respondErr := func(status int, msg string) {
+		respond(status, map[string]interface{}{"error": msg})
+	}
 
 	var req setProtectionRequest
 	if err := decodeJSONBody(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
+		respondErr(http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.Enabled == nil {
-		writeJSONError(w, http.StatusBadRequest, "enabled must be explicitly provided")
+		respondErr(http.StatusBadRequest, "enabled must be explicitly provided")
 		return
 	}
 
 	ws, err := database.SetIntegrationWorkspaceProtection(workspaceID, *req.Enabled)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSONError(w, http.StatusNotFound, "workspace not found")
+			respondErr(http.StatusNotFound, "workspace not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("workspace protection update failed: %v", err))
+		respondErr(http.StatusInternalServerError, fmt.Sprintf("workspace protection update failed: %v", err))
 		return
 	}
 
@@ -220,7 +244,7 @@ func handleIntegrationWorkspaceProtection(w http.ResponseWriter, r *http.Request
 	}
 	_, _ = database.LogAuditEventWithIncidentAndID(actorFromRequest(r), "PROTECTION_UPDATE", reason, "integration", state.GetState().PID, workspaceID, "")
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	respond(http.StatusOK, map[string]interface{}{
 		"ok":           true,
 		"workspace_id": ws.WorkspaceID,
 		"enabled":      ws.ProtectionEnabled,
@@ -235,30 +259,42 @@ func handleIntegrationWorkspaceActions(w http.ResponseWriter, r *http.Request, w
 	if !requireAuth(w, r) {
 		return
 	}
+	idemCtx, handled := beginIdempotentMutation(w, r, fmt.Sprintf("POST /v1/integrations/workspaces/%s/actions", workspaceID))
+	if handled {
+		return
+	}
+
+	respond := func(status int, payload map[string]interface{}) {
+		persistIdempotentMutation(idemCtx, status, payload)
+		writeJSON(w, status, payload)
+	}
+	respondErr := func(status int, msg string) {
+		respond(status, map[string]interface{}{"error": msg})
+	}
 
 	ws, err := database.GetIntegrationWorkspace(workspaceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSONError(w, http.StatusNotFound, "workspace not found")
+			respondErr(http.StatusNotFound, "workspace not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("workspace lookup failed: %v", err))
+		respondErr(http.StatusInternalServerError, fmt.Sprintf("workspace lookup failed: %v", err))
 		return
 	}
 
 	var req workspaceActionRequest
 	if err := decodeJSONBody(r, &req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
+		respondErr(http.StatusBadRequest, err.Error())
 		return
 	}
 	action := strings.ToLower(strings.TrimSpace(req.Action))
 	if action != "restart" && action != "kill" {
-		writeJSONError(w, http.StatusBadRequest, "action must be one of: restart, kill")
+		respondErr(http.StatusBadRequest, "action must be one of: restart, kill")
 		return
 	}
 
 	if !ws.ProtectionEnabled {
-		writeJSONError(w, http.StatusConflict, "workspace protection is disabled")
+		respondErr(http.StatusConflict, "workspace protection is disabled")
 		return
 	}
 
@@ -278,13 +314,13 @@ func handleIntegrationWorkspaceActions(w http.ResponseWriter, r *http.Request, w
 		msg := lifecycleErrorMessage(reqErr, "failed to request action")
 		if retryAfter := lifecycleRetryAfter(reqErr); retryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-			writeJSON(w, statusCode, map[string]interface{}{
+			respond(statusCode, map[string]interface{}{
 				"error":               msg,
 				"retry_after_seconds": retryAfter,
 			})
 			return
 		}
-		writeJSONError(w, statusCode, msg)
+		respondErr(statusCode, msg)
 		return
 	}
 
@@ -295,11 +331,11 @@ func handleIntegrationWorkspaceActions(w http.ResponseWriter, r *http.Request, w
 	actionLabel := strings.ToUpper("INTEGRATION_" + action)
 	auditEventID, err := database.LogAuditEventWithIncidentAndID(actorFromRequest(r), actionLabel, reason, "integration", decision.PID, workspaceID, "")
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("audit event write failed: %v", err))
+		respondErr(http.StatusInternalServerError, fmt.Sprintf("audit event write failed: %v", err))
 		return
 	}
 	if _, err := database.InsertIntegrationAction(workspaceID, action, reason, auditEventID, decision.Status); err != nil {
-		writeJSONError(w, http.StatusInternalServerError, fmt.Sprintf("integration action write failed: %v", err))
+		respondErr(http.StatusInternalServerError, fmt.Sprintf("integration action write failed: %v", err))
 		return
 	}
 	if decision.AcceptedNew {
@@ -311,7 +347,7 @@ func handleIntegrationWorkspaceActions(w http.ResponseWriter, r *http.Request, w
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	respond(http.StatusOK, map[string]interface{}{
 		"ok":             true,
 		"action":         action,
 		"audit_event_id": auditEventID,

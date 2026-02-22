@@ -50,3 +50,4 @@ Use this file as the single command reference for day-to-day operation.
 |---|---|
 | Release checkpoint | `./scripts/release_checkpoint.sh` |
 | Weekly SLO report | `./scripts/slo_weekly_review.sh --days 7` |
+| Control-plane replay drill | `./scripts/controlplane_replay_drill.sh` |

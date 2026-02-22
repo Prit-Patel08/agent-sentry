@@ -109,6 +109,7 @@ Notes:
 ./scripts/week1_pilot.sh
 ./scripts/tune_detection.sh
 ./scripts/recovery_drill.sh
+./scripts/controlplane_replay_drill.sh
 ./scripts/release_checkpoint.sh
 ```
 
@@ -121,6 +122,12 @@ Generate the weekly SLO report and error-budget decision artifact:
 
 ```bash
 ./scripts/slo_weekly_review.sh --days 7
+```
+
+Run control-plane idempotency replay drill evidence:
+
+```bash
+./scripts/controlplane_replay_drill.sh
 ```
 
 Artifact output:

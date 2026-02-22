@@ -69,7 +69,7 @@ func corsMiddleware(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Vary", "Origin")
 	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key")
 }
 
 func isLocalOrigin(raw string) bool {
@@ -445,30 +445,39 @@ func HandleProcessKill(w http.ResponseWriter, r *http.Request) {
 	if !requireAuth(w, r) {
 		return
 	}
-
-	workerControl.registerSpecFromStateIfMissing()
-	decision, err := requestLifecycleKill()
-	if err != nil {
-		writeJSONError(w, lifecycleHTTPCode(err, http.StatusInternalServerError), lifecycleErrorMessage(err, "failed to request kill"))
+	idemCtx, handled := beginIdempotentMutation(w, r, "POST /process/kill")
+	if handled {
 		return
 	}
-
-	stats := state.GetState()
 	reason := mutationReason(r)
 	if reason == "" {
 		reason = "manual API kill request"
 	}
+
+	workerControl.registerSpecFromStateIfMissing()
+	decision, err := requestLifecycleKill()
+	if err != nil {
+		statusCode := lifecycleHTTPCode(err, http.StatusInternalServerError)
+		msg := lifecycleErrorMessage(err, "failed to request kill")
+		payload := map[string]interface{}{"error": msg}
+		persistIdempotentMutation(idemCtx, statusCode, payload)
+		writeJSON(w, statusCode, payload)
+		return
+	}
+
+	stats := state.GetState()
 	if decision.AcceptedNew {
 		apiMetrics.IncProcessKill()
 		incidentID := uuid.NewString()
 		_ = database.LogAuditEventWithIncident(actorFromRequest(r), "KILL", reason, "api", decision.PID, stats.Command, incidentID)
 	}
-
-	writeJSON(w, http.StatusAccepted, map[string]interface{}{
+	payload := map[string]interface{}{
 		"status":    decision.Status,
 		"pid":       decision.PID,
 		"lifecycle": decision.Lifecycle,
-	})
+	}
+	persistIdempotentMutation(idemCtx, http.StatusAccepted, payload)
+	writeJSON(w, http.StatusAccepted, payload)
 }
 
 // HandleProcessRestart is exported for testing.
@@ -486,6 +495,14 @@ func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 	if !requireAuth(w, r) {
 		return
 	}
+	idemCtx, handled := beginIdempotentMutation(w, r, "POST /process/restart")
+	if handled {
+		return
+	}
+	reason := mutationReason(r)
+	if reason == "" {
+		reason = "manual API restart request"
+	}
 
 	workerControl.registerSpecFromStateIfMissing()
 	decision, err := requestLifecycleRestart()
@@ -499,33 +516,34 @@ func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 		}
 		if retryAfter := lifecycleRetryAfter(err); retryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-			writeJSON(w, statusCode, map[string]interface{}{
+			payload := map[string]interface{}{
 				"error":               msg,
 				"retry_after_seconds": retryAfter,
-			})
+			}
+			persistIdempotentMutation(idemCtx, statusCode, payload)
+			writeJSON(w, statusCode, payload)
 			return
 		}
-		writeJSONError(w, statusCode, msg)
+		payload := map[string]interface{}{"error": msg}
+		persistIdempotentMutation(idemCtx, statusCode, payload)
+		writeJSON(w, statusCode, payload)
 		return
 	}
 
 	stats := state.GetState()
-	reason := mutationReason(r)
-	if reason == "" {
-		reason = "manual API restart request"
-	}
 	if decision.AcceptedNew {
 		apiMetrics.IncProcessRestart()
 		incidentID := uuid.NewString()
 		_ = database.LogAuditEventWithIncident(actorFromRequest(r), "RESTART", reason, "api", decision.PID, stats.Command, incidentID)
 	}
-
-	writeJSON(w, http.StatusAccepted, map[string]interface{}{
+	payload := map[string]interface{}{
 		"status":    decision.Status,
 		"pid":       decision.PID,
 		"lifecycle": decision.Lifecycle,
 		"command":   stats.Command,
-	})
+	}
+	persistIdempotentMutation(idemCtx, http.StatusAccepted, payload)
+	writeJSON(w, http.StatusAccepted, payload)
 }
 
 func killProcessTree(pid int) error {

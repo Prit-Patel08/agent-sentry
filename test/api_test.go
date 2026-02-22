@@ -704,6 +704,82 @@ func TestRepeatedKillRequestsAreIdempotent(t *testing.T) {
 	}
 }
 
+func TestProcessKillIdempotencyReplayAndConflict(t *testing.T) {
+	setupTempDBForAPI(t)
+	api.ResetWorkerControlForTests()
+	os.Setenv("FLOWFORGE_API_KEY", "test-secret-key-12345")
+	defer os.Unsetenv("FLOWFORGE_API_KEY")
+
+	state.UpdateState(0, "", "STOPPED", "", nil, "", 0)
+
+	key := "idem-kill-replay-1"
+	firstBody := `{"reason":"idempotent kill test"}`
+
+	req1 := httptest.NewRequest("POST", "/process/kill", strings.NewReader(firstBody))
+	req1.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	req1.Header.Set("Content-Type", "application/json")
+	req1.Header.Set("Idempotency-Key", key)
+	w1 := httptest.NewRecorder()
+	api.HandleProcessKill(w1, req1)
+	status1 := w1.Result().StatusCode
+	if status1 >= 500 {
+		t.Fatalf("expected non-5xx status for first idempotent request, got %d", status1)
+	}
+
+	var payload1 map[string]interface{}
+	if err := json.NewDecoder(w1.Body).Decode(&payload1); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+
+	req2 := httptest.NewRequest("POST", "/process/kill", strings.NewReader(firstBody))
+	req2.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Idempotency-Key", key)
+	w2 := httptest.NewRecorder()
+	api.HandleProcessKill(w2, req2)
+
+	if w2.Result().StatusCode != status1 {
+		t.Fatalf("expected replay status %d, got %d", status1, w2.Result().StatusCode)
+	}
+	if replay := w2.Result().Header.Get("X-Idempotent-Replay"); replay != "true" {
+		t.Fatalf("expected X-Idempotent-Replay=true, got %q", replay)
+	}
+
+	var payload2 map[string]interface{}
+	if err := json.NewDecoder(w2.Body).Decode(&payload2); err != nil {
+		t.Fatalf("decode replay response: %v", err)
+	}
+	if !reflect.DeepEqual(payload1, payload2) {
+		t.Fatalf("expected replay payload to match first payload, first=%v replay=%v", payload1, payload2)
+	}
+
+	req3 := httptest.NewRequest("POST", "/process/kill", strings.NewReader(`{"reason":"different body"}`))
+	req3.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	req3.Header.Set("Content-Type", "application/json")
+	req3.Header.Set("Idempotency-Key", key)
+	w3 := httptest.NewRecorder()
+	api.HandleProcessKill(w3, req3)
+	if w3.Result().StatusCode != http.StatusConflict {
+		t.Fatalf("expected idempotency conflict status 409, got %d", w3.Result().StatusCode)
+	}
+
+	var conflictPayload map[string]interface{}
+	if err := json.NewDecoder(w3.Body).Decode(&conflictPayload); err != nil {
+		t.Fatalf("decode conflict response: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(stringValue(conflictPayload["error"])), "idempotency key reused") {
+		t.Fatalf("expected idempotency conflict error, got %#v", conflictPayload["error"])
+	}
+
+	rec, err := database.GetControlPlaneReplay(key, "POST /process/kill")
+	if err != nil {
+		t.Fatalf("GetControlPlaneReplay: %v", err)
+	}
+	if rec.ReplayCount != 1 {
+		t.Fatalf("expected replay_count=1, got %d", rec.ReplayCount)
+	}
+}
+
 func TestWorkerLifecycleEndpointSnapshotContract(t *testing.T) {
 	api.ResetWorkerControlForTests()
 
@@ -1455,6 +1531,226 @@ func TestIntegrationWorkspaceActionsRequireAuth(t *testing.T) {
 	api.HandleIntegrationWorkspaceScoped(w, req)
 	if w.Result().StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected status 401 for missing auth, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestIntegrationRegisterIdempotencyReplayAndConflict(t *testing.T) {
+	setupTempDBForAPI(t)
+	os.Setenv("FLOWFORGE_API_KEY", "test-secret-key-12345")
+	defer os.Unsetenv("FLOWFORGE_API_KEY")
+
+	key := "idem-integration-register-1"
+	firstBody := `{"workspace_id":"ws-idem-register","workspace_path":"/tmp/ws-idem-register","profile":"standard","client":"cursor"}`
+
+	req1 := httptest.NewRequest("POST", "/v1/integrations/workspaces/register", strings.NewReader(firstBody))
+	req1.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	req1.Header.Set("Content-Type", "application/json")
+	req1.Header.Set("Idempotency-Key", key)
+	w1 := httptest.NewRecorder()
+	api.HandleIntegrationWorkspaceRegister(w1, req1)
+	if w1.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected first register status 200, got %d", w1.Result().StatusCode)
+	}
+
+	var payload1 map[string]interface{}
+	if err := json.NewDecoder(w1.Body).Decode(&payload1); err != nil {
+		t.Fatalf("decode first register response: %v", err)
+	}
+
+	req2 := httptest.NewRequest("POST", "/v1/integrations/workspaces/register", strings.NewReader(firstBody))
+	req2.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Idempotency-Key", key)
+	w2 := httptest.NewRecorder()
+	api.HandleIntegrationWorkspaceRegister(w2, req2)
+
+	if w2.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected replay register status 200, got %d", w2.Result().StatusCode)
+	}
+	if replay := w2.Result().Header.Get("X-Idempotent-Replay"); replay != "true" {
+		t.Fatalf("expected X-Idempotent-Replay=true, got %q", replay)
+	}
+
+	var payload2 map[string]interface{}
+	if err := json.NewDecoder(w2.Body).Decode(&payload2); err != nil {
+		t.Fatalf("decode replay register response: %v", err)
+	}
+	if !reflect.DeepEqual(payload1, payload2) {
+		t.Fatalf("expected replay register payload to match first payload, first=%v replay=%v", payload1, payload2)
+	}
+
+	req3 := httptest.NewRequest("POST", "/v1/integrations/workspaces/register", strings.NewReader(`{"workspace_id":"ws-idem-register-2","workspace_path":"/tmp/ws-idem-register-2","profile":"standard","client":"cursor"}`))
+	req3.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	req3.Header.Set("Content-Type", "application/json")
+	req3.Header.Set("Idempotency-Key", key)
+	w3 := httptest.NewRecorder()
+	api.HandleIntegrationWorkspaceRegister(w3, req3)
+	if w3.Result().StatusCode != http.StatusConflict {
+		t.Fatalf("expected idempotency conflict status 409, got %d", w3.Result().StatusCode)
+	}
+
+	var conflictPayload map[string]interface{}
+	if err := json.NewDecoder(w3.Body).Decode(&conflictPayload); err != nil {
+		t.Fatalf("decode register conflict response: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(stringValue(conflictPayload["error"])), "idempotency key reused") {
+		t.Fatalf("expected idempotency conflict error, got %#v", conflictPayload["error"])
+	}
+
+	rec, err := database.GetControlPlaneReplay(key, "POST /v1/integrations/workspaces/register")
+	if err != nil {
+		t.Fatalf("GetControlPlaneReplay(register): %v", err)
+	}
+	if rec.ReplayCount != 1 {
+		t.Fatalf("expected register replay_count=1, got %d", rec.ReplayCount)
+	}
+}
+
+func TestIntegrationProtectionIdempotencyReplayAndConflict(t *testing.T) {
+	setupTempDBForAPI(t)
+	os.Setenv("FLOWFORGE_API_KEY", "test-secret-key-12345")
+	defer os.Unsetenv("FLOWFORGE_API_KEY")
+
+	registerWorkspaceForTest(t, "ws-idem-protection", "/tmp/ws-idem-protection")
+	key := "idem-integration-protection-1"
+	firstBody := `{"enabled":false,"reason":"idempotent protection test"}`
+
+	req1 := httptest.NewRequest("POST", "/v1/integrations/workspaces/ws-idem-protection/protection", strings.NewReader(firstBody))
+	req1.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	req1.Header.Set("Content-Type", "application/json")
+	req1.Header.Set("Idempotency-Key", key)
+	w1 := httptest.NewRecorder()
+	api.HandleIntegrationWorkspaceScoped(w1, req1)
+	if w1.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected first protection status 200, got %d", w1.Result().StatusCode)
+	}
+
+	var payload1 map[string]interface{}
+	if err := json.NewDecoder(w1.Body).Decode(&payload1); err != nil {
+		t.Fatalf("decode first protection response: %v", err)
+	}
+
+	req2 := httptest.NewRequest("POST", "/v1/integrations/workspaces/ws-idem-protection/protection", strings.NewReader(firstBody))
+	req2.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Idempotency-Key", key)
+	w2 := httptest.NewRecorder()
+	api.HandleIntegrationWorkspaceScoped(w2, req2)
+	if w2.Result().StatusCode != http.StatusOK {
+		t.Fatalf("expected replay protection status 200, got %d", w2.Result().StatusCode)
+	}
+	if replay := w2.Result().Header.Get("X-Idempotent-Replay"); replay != "true" {
+		t.Fatalf("expected X-Idempotent-Replay=true, got %q", replay)
+	}
+
+	var payload2 map[string]interface{}
+	if err := json.NewDecoder(w2.Body).Decode(&payload2); err != nil {
+		t.Fatalf("decode replay protection response: %v", err)
+	}
+	if !reflect.DeepEqual(payload1, payload2) {
+		t.Fatalf("expected replay protection payload to match first payload, first=%v replay=%v", payload1, payload2)
+	}
+
+	req3 := httptest.NewRequest("POST", "/v1/integrations/workspaces/ws-idem-protection/protection", strings.NewReader(`{"enabled":true,"reason":"flip protection"}`))
+	req3.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	req3.Header.Set("Content-Type", "application/json")
+	req3.Header.Set("Idempotency-Key", key)
+	w3 := httptest.NewRecorder()
+	api.HandleIntegrationWorkspaceScoped(w3, req3)
+	if w3.Result().StatusCode != http.StatusConflict {
+		t.Fatalf("expected protection idempotency conflict status 409, got %d", w3.Result().StatusCode)
+	}
+
+	var conflictPayload map[string]interface{}
+	if err := json.NewDecoder(w3.Body).Decode(&conflictPayload); err != nil {
+		t.Fatalf("decode protection conflict response: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(stringValue(conflictPayload["error"])), "idempotency key reused") {
+		t.Fatalf("expected protection idempotency conflict error, got %#v", conflictPayload["error"])
+	}
+
+	rec, err := database.GetControlPlaneReplay(key, "POST /v1/integrations/workspaces/ws-idem-protection/protection")
+	if err != nil {
+		t.Fatalf("GetControlPlaneReplay(protection): %v", err)
+	}
+	if rec.ReplayCount != 1 {
+		t.Fatalf("expected protection replay_count=1, got %d", rec.ReplayCount)
+	}
+}
+
+func TestIntegrationActionsIdempotencyReplayAndConflict(t *testing.T) {
+	setupTempDBForAPI(t)
+	api.ResetWorkerControlForTests()
+	os.Setenv("FLOWFORGE_API_KEY", "test-secret-key-12345")
+	defer os.Unsetenv("FLOWFORGE_API_KEY")
+
+	registerWorkspaceForTest(t, "ws-idem-actions", "/tmp/ws-idem-actions")
+	state.UpdateState(0, "", "STOPPED", "/bin/sh -c sleep 5", []string{"/bin/sh", "-c", "sleep 5"}, "", 0)
+
+	key := "idem-integration-actions-1"
+	firstBody := `{"action":"kill","reason":"idempotent action test"}`
+
+	req1 := httptest.NewRequest("POST", "/v1/integrations/workspaces/ws-idem-actions/actions", strings.NewReader(firstBody))
+	req1.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	req1.Header.Set("Content-Type", "application/json")
+	req1.Header.Set("Idempotency-Key", key)
+	w1 := httptest.NewRecorder()
+	api.HandleIntegrationWorkspaceScoped(w1, req1)
+	status1 := w1.Result().StatusCode
+	if status1 >= 500 {
+		t.Fatalf("expected non-5xx first actions status, got %d", status1)
+	}
+
+	var payload1 map[string]interface{}
+	if err := json.NewDecoder(w1.Body).Decode(&payload1); err != nil {
+		t.Fatalf("decode first actions response: %v", err)
+	}
+
+	req2 := httptest.NewRequest("POST", "/v1/integrations/workspaces/ws-idem-actions/actions", strings.NewReader(firstBody))
+	req2.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Idempotency-Key", key)
+	w2 := httptest.NewRecorder()
+	api.HandleIntegrationWorkspaceScoped(w2, req2)
+	if w2.Result().StatusCode != status1 {
+		t.Fatalf("expected replay actions status %d, got %d", status1, w2.Result().StatusCode)
+	}
+	if replay := w2.Result().Header.Get("X-Idempotent-Replay"); replay != "true" {
+		t.Fatalf("expected X-Idempotent-Replay=true, got %q", replay)
+	}
+
+	var payload2 map[string]interface{}
+	if err := json.NewDecoder(w2.Body).Decode(&payload2); err != nil {
+		t.Fatalf("decode replay actions response: %v", err)
+	}
+	if !reflect.DeepEqual(payload1, payload2) {
+		t.Fatalf("expected replay actions payload to match first payload, first=%v replay=%v", payload1, payload2)
+	}
+
+	req3 := httptest.NewRequest("POST", "/v1/integrations/workspaces/ws-idem-actions/actions", strings.NewReader(`{"action":"restart","reason":"different action payload"}`))
+	req3.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	req3.Header.Set("Content-Type", "application/json")
+	req3.Header.Set("Idempotency-Key", key)
+	w3 := httptest.NewRecorder()
+	api.HandleIntegrationWorkspaceScoped(w3, req3)
+	if w3.Result().StatusCode != http.StatusConflict {
+		t.Fatalf("expected actions idempotency conflict status 409, got %d", w3.Result().StatusCode)
+	}
+
+	var conflictPayload map[string]interface{}
+	if err := json.NewDecoder(w3.Body).Decode(&conflictPayload); err != nil {
+		t.Fatalf("decode actions conflict response: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(stringValue(conflictPayload["error"])), "idempotency key reused") {
+		t.Fatalf("expected actions idempotency conflict error, got %#v", conflictPayload["error"])
+	}
+
+	rec, err := database.GetControlPlaneReplay(key, "POST /v1/integrations/workspaces/ws-idem-actions/actions")
+	if err != nil {
+		t.Fatalf("GetControlPlaneReplay(actions): %v", err)
+	}
+	if rec.ReplayCount != 1 {
+		t.Fatalf("expected actions replay_count=1, got %d", rec.ReplayCount)
 	}
 }
 

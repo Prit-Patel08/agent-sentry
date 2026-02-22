@@ -102,11 +102,13 @@ Run reliability drills:
 
 ```bash
 ./scripts/recovery_drill.sh
+./scripts/controlplane_replay_drill.sh
 ```
 
 The drill must confirm:
 - parent SIGTERM leaves no child orphan
 - API kill removes active process
+- idempotency replay returns cached response and conflicting payload is rejected
 
 Teardown guarantee and limit:
 - FlowForge sends `SIGTERM` to the entire supervised process group first.

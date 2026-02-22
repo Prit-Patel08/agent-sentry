@@ -9,13 +9,15 @@ import (
 )
 
 type Store struct {
-	mu                   sync.Mutex
-	startedAt            time.Time
-	authFailures         uint64
-	processKills         uint64
-	processRestarts      uint64
-	restartBudgetBlocked uint64
-	httpRequests         map[string]uint64
+	mu                        sync.Mutex
+	startedAt                 time.Time
+	authFailures              uint64
+	processKills              uint64
+	processRestarts           uint64
+	restartBudgetBlocked      uint64
+	controlPlaneReplayTotal   uint64
+	controlPlaneConflictTotal uint64
+	httpRequests              map[string]uint64
 
 	stopLatencyCount       uint64
 	stopLatencySuccess     uint64
@@ -73,6 +75,18 @@ func (s *Store) IncRestartBudgetBlocked() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.restartBudgetBlocked++
+}
+
+func (s *Store) IncControlPlaneIdempotentReplay() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.controlPlaneReplayTotal++
+}
+
+func (s *Store) IncControlPlaneIdempotencyConflict() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.controlPlaneConflictTotal++
 }
 
 func (s *Store) ObserveStopLatency(seconds float64, success bool) {
@@ -152,6 +166,14 @@ func (s *Store) Prometheus(activeProcess bool) string {
 	b.WriteString("# HELP flowforge_restart_budget_block_total Restart requests blocked by restart budget.\n")
 	b.WriteString("# TYPE flowforge_restart_budget_block_total counter\n")
 	fmt.Fprintf(&b, "flowforge_restart_budget_block_total %d\n", s.restartBudgetBlocked)
+
+	b.WriteString("# HELP flowforge_controlplane_idempotent_replay_total Replayed control-plane mutations served from persisted idempotency state.\n")
+	b.WriteString("# TYPE flowforge_controlplane_idempotent_replay_total counter\n")
+	fmt.Fprintf(&b, "flowforge_controlplane_idempotent_replay_total %d\n", s.controlPlaneReplayTotal)
+
+	b.WriteString("# HELP flowforge_controlplane_idempotency_conflict_total Conflicts where an idempotency key was reused with a different payload.\n")
+	b.WriteString("# TYPE flowforge_controlplane_idempotency_conflict_total counter\n")
+	fmt.Fprintf(&b, "flowforge_controlplane_idempotency_conflict_total %d\n", s.controlPlaneConflictTotal)
 
 	b.WriteString("# HELP flowforge_uptime_seconds API uptime in seconds.\n")
 	b.WriteString("# TYPE flowforge_uptime_seconds gauge\n")
