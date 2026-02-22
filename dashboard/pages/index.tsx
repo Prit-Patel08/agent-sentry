@@ -16,7 +16,7 @@ import { useRouter } from 'next/router';
 import { ShieldAlert, Zap, Activity, ServerCrash, Terminal, Cpu, Skull, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-const API_BASE = process.env.NEXT_PUBLIC_FLOWFORGE_API_BASE || 'http://localhost:8080';
+const API_BASE = process.env.NEXT_PUBLIC_FLOWFORGE_API_BASE || 'http://127.0.0.1:8080';
 const fetchJSON = async (url: string): Promise<unknown> => {
   const res = await fetch(url);
   if (!res.ok) {
