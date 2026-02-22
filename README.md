@@ -53,10 +53,25 @@ Run demo again:
 ./flowforge demo
 ```
 
-Start API only:
+Start/attach local API daemon:
 
 ```bash
 ./flowforge dashboard
+```
+
+Direct daemon lifecycle commands:
+
+```bash
+./flowforge daemon start
+./flowforge daemon status
+./flowforge daemon logs --lines 120
+./flowforge daemon stop
+```
+
+Run API in foreground (script/CI mode):
+
+```bash
+./flowforge dashboard --foreground
 ```
 
 Use baseline profile defaults:
@@ -89,6 +104,7 @@ process -> monitor -> decision -> action -> DB events -> API -> dashboard
 ## Core Components
 
 - CLI commands: `cmd/run.go`, `cmd/demo.go`, `cmd/dashboard.go`
+- Daemon lifecycle: `cmd/daemon.go`, `internal/daemon/runtime.go`
 - API server: `internal/api/server.go`
 - Runtime state: `internal/state/state.go`
 - Persistence: `internal/database/db.go`

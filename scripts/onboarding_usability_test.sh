@@ -291,7 +291,7 @@ fi
 
 API_LOG="$LOG_DIR/api_server.log"
 (
-  ./flowforge dashboard
+  ./flowforge dashboard --foreground
 ) >"$API_LOG" 2>&1 &
 API_PID=$!
 

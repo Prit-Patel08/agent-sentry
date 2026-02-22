@@ -9,6 +9,14 @@
 - Replay history: `GET /v1/ops/controlplane/replay/history?days=7` (daily replay/conflict trend + ledger stats)
 - Request trace: `GET /v1/ops/requests/{request_id}?limit=200` (all correlated control-plane/runtime events for a single request id)
 
+## Local Daemon Lifecycle
+
+- Start/attach daemon: `./flowforge daemon start` (or `./flowforge dashboard`)
+- Status: `./flowforge daemon status`
+- Logs: `./flowforge daemon logs --lines 120` (or `--follow`)
+- Stop: `./flowforge daemon stop`
+- Foreground API mode for script-managed lifecycle: `./flowforge dashboard --foreground`
+
 ## Hardened Container Run
 
 ```bash

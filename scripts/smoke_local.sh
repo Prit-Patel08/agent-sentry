@@ -81,7 +81,7 @@ grep -q "CPU peaked at" "$DEMO_LOG"
 grep -q "Process recovered" "$DEMO_LOG"
 
 echo "[4/5] Starting API + dashboard..."
-FLOWFORGE_DB_PATH="$SMOKE_DB_PATH" FLOWFORGE_BIND_HOST=127.0.0.1 ./flowforge dashboard >"$API_LOG" 2>&1 &
+FLOWFORGE_DB_PATH="$SMOKE_DB_PATH" FLOWFORGE_BIND_HOST=127.0.0.1 ./flowforge dashboard --foreground >"$API_LOG" 2>&1 &
 API_PID=$!
 wait_for_http "$API_BASE/healthz" 30 1
 

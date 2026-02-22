@@ -20,7 +20,8 @@ It captures stdout/stderr, monitors CPU usage, and handles graceful shutdowns.
 
 * [flowforge clean](flowforge_clean.md)	 - Prune old logs and optimize database
 * [flowforge completion](flowforge_completion.md)	 - Generate the autocompletion script for the specified shell
-* [flowforge dashboard](flowforge_dashboard.md)	 - Start the FlowForge dashboard API
+* [flowforge daemon](flowforge_daemon.md)	 - Manage the local FlowForge background daemon
+* [flowforge dashboard](flowforge_dashboard.md)	 - Ensure the FlowForge dashboard API is running
 * [flowforge demo](flowforge_demo.md)	 - Run a 60-second product demo with automatic runaway recovery
 * [flowforge docs](flowforge_docs.md)	 - Generate Markdown documentation for the CLI
 * [flowforge evidence](flowforge_evidence.md)	 - Manage signed evidence bundles

@@ -1,11 +1,12 @@
 ## flowforge dashboard
 
-Start the FlowForge dashboard API
+Ensure the FlowForge dashboard API is running
 
 ### Synopsis
 
-Starts the HTTP API server on port 8080.
-This allows the Next.js dashboard to query incident history.
+Ensures the HTTP API server is running for the dashboard.
+By default this command starts (or reuses) the local daemon.
+Use --foreground to keep the API server attached to the current terminal.
 
 
 ```
@@ -15,7 +16,10 @@ flowforge dashboard [flags]
 ### Options
 
 ```
-  -h, --help   help for dashboard
+      --foreground         run API in foreground (for scripts and managed process lifecycle)
+  -h, --help               help for dashboard
+      --port string        API port for the dashboard backend (default "8080")
+      --wait-seconds int   seconds to wait for daemon health (default 10)
 ```
 
 ### Options inherited from parent commands

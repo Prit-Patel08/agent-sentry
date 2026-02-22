@@ -87,7 +87,7 @@ Procedure:
 1. Ensure FlowForge API is running:
 
 ```bash
-./flowforge dashboard
+./flowforge daemon start
 ```
 
 2. Generate weekly report:

@@ -10,7 +10,18 @@ Use this file as the single command reference for day-to-day operation.
 | Toolchain diagnostics (strict profile) | `make doctor-strict` |
 | Tooling summary artifact | `make doctor-summary` |
 
-## 2) Local Quality Gates
+## 2) Local Daemon Operations
+
+| Goal | Command |
+|---|---|
+| Start/attach daemon | `./flowforge daemon start` |
+| Start/attach daemon (legacy shortcut) | `./flowforge dashboard` |
+| Stop daemon | `./flowforge daemon stop` |
+| Daemon status | `./flowforge daemon status` |
+| Daemon logs | `./flowforge daemon logs --lines 120` |
+| Foreground API mode (script lifecycle control) | `./flowforge dashboard --foreground` |
+
+## 3) Local Quality Gates
 
 | Goal | Command |
 |---|---|
@@ -20,14 +31,14 @@ Use this file as the single command reference for day-to-day operation.
 | Pre-commit gate | `make precommit` |
 | Contract test suite | `make contracts` |
 
-## 3) Git Hook Workflow
+## 4) Git Hook Workflow
 
 | Goal | Command |
 |---|---|
 | Install managed pre-commit hook | `make hook` |
 | Install strict pre-commit hook | `make hook-strict` |
 
-## 4) Cloud-Ready Local Ops
+## 5) Cloud-Ready Local Ops
 
 | Goal | Command |
 |---|---|
@@ -36,7 +47,7 @@ Use this file as the single command reference for day-to-day operation.
 | Cloud readiness smoke (deps + `/readyz`) | `./scripts/cloud_ready_smoke.sh` |
 | Cloud readiness smoke (deps only) | `./scripts/cloud_ready_smoke.sh --skip-readyz` |
 
-## 5) Snapshot and Evidence
+## 6) Snapshot and Evidence
 
 | Goal | Command |
 |---|---|
@@ -46,7 +57,7 @@ Use this file as the single command reference for day-to-day operation.
 | Verify signed evidence bundle | `go run . evidence verify --bundle-dir pilot_artifacts/evidence-<timestamp>` |
 | Correlate a failed request by request id | `curl -s "http://127.0.0.1:8080/v1/ops/requests/<request_id>?limit=200" \| jq .` |
 
-## 6) Release Workflow
+## 7) Release Workflow
 
 | Goal | Command |
 |---|---|

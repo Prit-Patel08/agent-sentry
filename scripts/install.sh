@@ -212,7 +212,7 @@ trap cleanup EXIT
 echo "🚀 Starting services..."
 
 echo "Starting API..."
-./flowforge dashboard &
+./flowforge dashboard --foreground &
 API_PID=$!
 wait_for_http "http://127.0.0.1:${API_PORT}/healthz" 30 1
 

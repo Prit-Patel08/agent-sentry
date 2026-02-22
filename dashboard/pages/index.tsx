@@ -687,7 +687,7 @@ export default function Dashboard() {
                 <ShieldAlert size={20} />
                 <div>
                   <p className="font-semibold">Connection Lost</p>
-                  <p className="text-xs opacity-75">Ensure the FlowForge CLI is running with `flowforge dashboard`.</p>
+                  <p className="text-xs opacity-75">Start the local daemon with `flowforge daemon start` (or `flowforge dashboard`).</p>
                 </div>
               </div>
             )}

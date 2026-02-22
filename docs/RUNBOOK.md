@@ -18,6 +18,21 @@ Or backend only:
 ./flowforge dashboard
 ```
 
+Foreground backend mode (for scripts that manage PID lifecycle directly):
+
+```bash
+./flowforge dashboard --foreground
+```
+
+Daemon lifecycle commands:
+
+```bash
+./flowforge daemon start
+./flowforge daemon status
+./flowforge daemon logs --follow
+./flowforge daemon stop
+```
+
 ## 2. Smoke Check (Release Gate)
 
 ```bash
