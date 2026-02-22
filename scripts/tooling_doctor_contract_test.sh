@@ -93,7 +93,9 @@ EOF
 run_all_tools_present_case() {
   local summary="$tmp_dir/summary-all.tsv"
   ./scripts/tooling_doctor.sh --strict --summary-file "$summary" >/dev/null
-  assert_file_contains "$summary" "^tool\\tstatus\\tdetail$"
+  # Keep compatibility with both historical ("detail") and newer ("details")
+  # header spellings so contract tests do not flap on this non-breaking rename.
+  assert_file_contains "$summary" "^tool\\tstatus\\tdetails?$"
   assert_file_contains "$summary" "^go\\tPASS\\t"
   assert_file_contains "$summary" "^docker\\tPASS\\t"
   assert_file_contains "$summary" "^shellcheck\\tPASS\\t"
