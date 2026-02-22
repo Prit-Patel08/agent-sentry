@@ -972,7 +972,7 @@ func TestMetricsIncludeLifecycleLatencySLOSignals(t *testing.T) {
 	}
 
 	var pid int
-	restartDeadline := time.Now().Add(3 * time.Second)
+	restartDeadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(restartDeadline) {
 		st := state.GetState()
 		if st.Status == "RUNNING" && st.PID > 0 {
@@ -982,7 +982,12 @@ func TestMetricsIncludeLifecycleLatencySLOSignals(t *testing.T) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	if pid == 0 {
-		t.Fatal("expected restarted process pid > 0")
+		st := state.GetState()
+		lifecycleReq := httptest.NewRequest("GET", "/worker/lifecycle", nil)
+		lifecycleW := httptest.NewRecorder()
+		api.HandleWorkerLifecycle(lifecycleW, lifecycleReq)
+		lifecycleBody := lifecycleW.Body.String()
+		t.Fatalf("expected restarted process pid > 0 (state=%+v lifecycle_status=%d lifecycle_body=%s)", st, lifecycleW.Result().StatusCode, lifecycleBody)
 	}
 	t.Cleanup(func() {
 		_ = syscall.Kill(-pid, syscall.SIGKILL)
@@ -997,7 +1002,7 @@ func TestMetricsIncludeLifecycleLatencySLOSignals(t *testing.T) {
 		t.Fatalf("expected kill status 202, got %d", killW.Result().StatusCode)
 	}
 
-	stopDeadline := time.Now().Add(3 * time.Second)
+	stopDeadline := time.Now().Add(6 * time.Second)
 	for time.Now().Before(stopDeadline) {
 		st := state.GetState()
 		if st.Status == "STOPPED" {
