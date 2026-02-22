@@ -68,6 +68,14 @@ Optional local commit gate:
 ./scripts/install_git_hook.sh --strict
 ```
 
+Equivalent make shortcuts:
+
+```bash
+make doctor
+make contracts
+make precommit
+```
+
 Notes:
 - strict mode fails if `staticcheck`/`govulncheck` are missing
 - if `govulncheck` reports Go stdlib advisories, upgrade local Go patch version to match CI (`1.25.7`)

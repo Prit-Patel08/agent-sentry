@@ -4959,6 +4959,7 @@ Build FlowForge into the trusted deterministic execution-control infrastructure 
 - [x] git hook installer hardened (`--strict`, custom `core.hooksPath` support) + contract tests in CI
 - [x] backend CI parity hardened (explicit Go package targets + `go vet` gate aligned with local verify)
 - [x] tooling doctor + dynamic-port contract tests added (precommit integration and flake-resistant local checks)
+- [x] developer bootstrap path simplified (Makefile shortcuts + CI tooling-doctor strict gate + first-run quickstart)
 - [x] formal SLO dashboard operations in weekly ritual
 - [x] chaos drill evidence published
 - [x] external first-time usability validation completed

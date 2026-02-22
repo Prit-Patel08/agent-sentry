@@ -146,6 +146,21 @@ Fixtures:
 
 ## Build and Validation
 
+New machine bootstrap + first successful gate run:
+
+```bash
+make doctor
+npm --prefix dashboard ci
+make contracts
+make precommit
+```
+
+Strict toolchain profile (matches CI expectations):
+
+```bash
+make doctor-strict
+```
+
 One-command local gate:
 
 ```bash
@@ -173,6 +188,7 @@ If `FLOWFORGE_CLOUD_DEPS_REQUIRED=1`, it also enforces `/readyz` health (HTTP 20
 If `govulncheck` reports Go standard library advisories, upgrade your local Go patch version (CI uses Go `1.25.7`).
 Release checkpoint contract tests: `./scripts/release_checkpoint_contract_test.sh`.
 CI also enforces `shellcheck` for `scripts/*.sh`.
+CI also runs `tooling_doctor.sh --strict`.
 ShellCheck policy is pinned in repo at `.shellcheckrc`.
 Run local toolchain diagnostics: `./scripts/tooling_doctor.sh` (or `--strict`).
 Fast local pre-commit checks: `./scripts/precommit_checks.sh`.
