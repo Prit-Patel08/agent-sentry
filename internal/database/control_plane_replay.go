@@ -18,6 +18,12 @@ type ControlPlaneReplay struct {
 	LastSeenAt     string `json:"last_seen_at"`
 }
 
+type ControlPlaneReplayStats struct {
+	RowCount         int `json:"row_count"`
+	OldestAgeSeconds int `json:"oldest_age_seconds"`
+	NewestAgeSeconds int `json:"newest_age_seconds"`
+}
+
 func GetControlPlaneReplay(idempotencyKey, endpoint string) (ControlPlaneReplay, error) {
 	if db == nil {
 		return ControlPlaneReplay{}, fmt.Errorf("db not initialized")
@@ -167,6 +173,27 @@ func CountControlPlaneReplayRows() (int, error) {
 		return 0, err
 	}
 	return count, nil
+}
+
+func GetControlPlaneReplayStats() (ControlPlaneReplayStats, error) {
+	if db == nil {
+		return ControlPlaneReplayStats{}, fmt.Errorf("db not initialized")
+	}
+	var stats ControlPlaneReplayStats
+	if err := db.QueryRow(`
+SELECT
+	COUNT(*) AS row_count,
+	COALESCE(CAST((julianday('now') - julianday(MIN(last_seen_at))) * 86400 AS INTEGER), 0) AS oldest_age_seconds,
+	COALESCE(CAST((julianday('now') - julianday(MAX(last_seen_at))) * 86400 AS INTEGER), 0) AS newest_age_seconds
+FROM control_plane_replays
+`).Scan(
+		&stats.RowCount,
+		&stats.OldestAgeSeconds,
+		&stats.NewestAgeSeconds,
+	); err != nil {
+		return ControlPlaneReplayStats{}, err
+	}
+	return stats, nil
 }
 
 // PurgeControlPlaneReplays deletes stale replay rows.

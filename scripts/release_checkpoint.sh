@@ -70,6 +70,8 @@ evidence_bundle_status="SKIPPED (FLOWFORGE_REQUIRE_EVIDENCE_BUNDLE not enabled)"
 evidence_bundle_dir=""
 controlplane_replay_drill_status="SKIPPED (FLOWFORGE_REQUIRE_CONTROLPLANE_REPLAY_DRILL not enabled)"
 controlplane_replay_drill_dir=""
+controlplane_replay_retention_status="SKIPPED (FLOWFORGE_RUN_CONTROLPLANE_REPLAY_RETENTION not enabled)"
+controlplane_replay_retention_dir=""
 
 if is_truthy "${FLOWFORGE_CLOUD_DEPS_REQUIRED:-0}"; then
   readyz_artifact="$REPORT_DIR/readyz.json"
@@ -149,6 +151,42 @@ if is_truthy "${FLOWFORGE_REQUIRE_CONTROLPLANE_REPLAY_DRILL:-0}"; then
   controlplane_replay_drill_status="PASS"
 fi
 
+if is_truthy "${FLOWFORGE_RUN_CONTROLPLANE_REPLAY_RETENTION:-0}"; then
+  if [[ ! -x "./scripts/controlplane_replay_retention.sh" ]]; then
+    echo "Blocked: replay retention script missing or not executable (scripts/controlplane_replay_retention.sh)." >&2
+    exit 1
+  fi
+
+  retention_days="${FLOWFORGE_CONTROLPLANE_REPLAY_RETENTION_DAYS:-30}"
+  max_rows="${FLOWFORGE_CONTROLPLANE_REPLAY_MAX_ROWS:-50000}"
+  controlplane_replay_retention_dir="$REPORT_DIR/controlplane-replay-retention"
+
+  retention_cmd=(
+    ./scripts/controlplane_replay_retention.sh
+    --retention-days "$retention_days"
+    --max-rows "$max_rows"
+    --out "$controlplane_replay_retention_dir"
+  )
+  if [[ -n "${FLOWFORGE_DB_PATH:-}" ]]; then
+    retention_cmd+=(--db "${FLOWFORGE_DB_PATH}")
+  fi
+  "${retention_cmd[@]}" >/dev/null
+
+  retention_summary="$controlplane_replay_retention_dir/summary.tsv"
+  if [[ ! -f "$retention_summary" ]]; then
+    echo "Blocked: replay retention script did not produce summary.tsv." >&2
+    exit 1
+  fi
+  if grep -q $'^status\tPASS$' "$retention_summary"; then
+    controlplane_replay_retention_status="PASS"
+  elif grep -q $'^status\tSKIPPED$' "$retention_summary"; then
+    controlplane_replay_retention_status="SKIPPED"
+  else
+    echo "Blocked: replay retention script status was neither PASS nor SKIPPED." >&2
+    exit 1
+  fi
+fi
+
 cat > "$REPORT_FILE" <<EOF
 # Release Checkpoint
 
@@ -163,6 +201,7 @@ Date: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 - Cloud dependency readiness gate: $cloud_readiness_status
 - Signed evidence bundle gate: $evidence_bundle_status
 - Control-plane replay drill gate: $controlplane_replay_drill_status
+- Control-plane replay retention prune: $controlplane_replay_retention_status
 
 ## Readiness Evidence
 
@@ -170,6 +209,7 @@ Date: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 - Ready payload artifact: ${readyz_artifact:-N/A}
 - Evidence bundle artifact: ${evidence_bundle_dir:-N/A}
 - Control-plane replay drill artifact: ${controlplane_replay_drill_dir:-N/A}
+- Control-plane replay retention artifact: ${controlplane_replay_retention_dir:-N/A}
 
 ## Ready
 

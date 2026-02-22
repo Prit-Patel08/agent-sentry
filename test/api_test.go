@@ -993,6 +993,15 @@ func TestMetricsIncludeLifecycleLatencySLOSignals(t *testing.T) {
 	if _, ok := metricValue(body, "flowforge_stop_slo_compliance_ratio"); !ok {
 		t.Fatalf("expected flowforge_stop_slo_compliance_ratio metric in output")
 	}
+	if _, ok := metricValue(body, "flowforge_controlplane_replay_rows"); !ok {
+		t.Fatalf("expected flowforge_controlplane_replay_rows metric in output")
+	}
+	if _, ok := metricValue(body, "flowforge_controlplane_replay_oldest_age_seconds"); !ok {
+		t.Fatalf("expected flowforge_controlplane_replay_oldest_age_seconds metric in output")
+	}
+	if statsErr, ok := metricValue(body, "flowforge_controlplane_replay_stats_error"); !ok || statsErr != 0 {
+		t.Fatalf("expected flowforge_controlplane_replay_stats_error=0, got %v (ok=%v)", statsErr, ok)
+	}
 }
 
 func TestHealthEndpoint(t *testing.T) {

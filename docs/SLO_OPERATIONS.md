@@ -24,6 +24,12 @@ Required:
 ./scripts/slo_weekly_review.sh --days 7
 ```
 
+Optional replay-cap target override:
+
+```bash
+./scripts/slo_weekly_review.sh --days 7 --replay-max-rows 50000
+```
+
 Output directory default:
 - `pilot_artifacts/slo-weekly-<timestamp>/`
 
@@ -60,6 +66,10 @@ Output directory default:
 3. Idempotency conflict events:
 - target: `0`
 - source: weekly `audit` events with title `IDEMPOTENT_CONFLICT`
+
+4. Replay ledger row capacity:
+- target: `<= 50000`
+- source: `control_plane_replays` row count (and `/metrics` replay-row gauges)
 
 ## Weekly Ritual (Mandatory)
 

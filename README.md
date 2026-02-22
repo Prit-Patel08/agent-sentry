@@ -214,6 +214,7 @@ Release smoke gate:
 Release checkpoint (`./scripts/release_checkpoint.sh`) runs `verify_local.sh --strict`.
 If `FLOWFORGE_CLOUD_DEPS_REQUIRED=1`, it also enforces `/readyz` health (HTTP 200 + `status=ready` + `cloud_dependencies_required=true`).
 If `FLOWFORGE_REQUIRE_CONTROLPLANE_REPLAY_DRILL=1`, it enforces a passing `controlplane_replay_drill.sh` run against the live API.
+If `FLOWFORGE_RUN_CONTROLPLANE_REPLAY_RETENTION=1`, it runs replay-ledger retention prune and records artifact output in release report.
 If `govulncheck` reports Go standard library advisories, upgrade your local Go patch version (CI uses Go `1.25.7`).
 Release checkpoint contract tests: `./scripts/release_checkpoint_contract_test.sh`.
 Tooling doctor contract tests: `./scripts/tooling_doctor_contract_test.sh`.

@@ -328,6 +328,44 @@ func HandleMetrics(w http.ResponseWriter, r *http.Request) {
 	active := st.Status != "STOPPED" && st.PID > 0
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	_, _ = fmt.Fprint(w, apiMetrics.Prometheus(active))
+	_, _ = fmt.Fprint(w, controlPlaneReplayPrometheus())
+}
+
+func controlPlaneReplayPrometheus() string {
+	var b strings.Builder
+	b.WriteString("# HELP flowforge_controlplane_replay_rows Current number of persisted control-plane replay rows.\n")
+	b.WriteString("# TYPE flowforge_controlplane_replay_rows gauge\n")
+	b.WriteString("# HELP flowforge_controlplane_replay_oldest_age_seconds Age in seconds of the oldest replay row by last_seen_at.\n")
+	b.WriteString("# TYPE flowforge_controlplane_replay_oldest_age_seconds gauge\n")
+	b.WriteString("# HELP flowforge_controlplane_replay_newest_age_seconds Age in seconds of the newest replay row by last_seen_at.\n")
+	b.WriteString("# TYPE flowforge_controlplane_replay_newest_age_seconds gauge\n")
+	b.WriteString("# HELP flowforge_controlplane_replay_stats_error Whether replay stats collection failed (1) or succeeded (0).\n")
+	b.WriteString("# TYPE flowforge_controlplane_replay_stats_error gauge\n")
+
+	if database.GetDB() == nil {
+		if err := database.InitDB(); err != nil {
+			b.WriteString("flowforge_controlplane_replay_rows 0\n")
+			b.WriteString("flowforge_controlplane_replay_oldest_age_seconds 0\n")
+			b.WriteString("flowforge_controlplane_replay_newest_age_seconds 0\n")
+			b.WriteString("flowforge_controlplane_replay_stats_error 1\n")
+			return b.String()
+		}
+	}
+
+	stats, err := database.GetControlPlaneReplayStats()
+	if err != nil {
+		b.WriteString("flowforge_controlplane_replay_rows 0\n")
+		b.WriteString("flowforge_controlplane_replay_oldest_age_seconds 0\n")
+		b.WriteString("flowforge_controlplane_replay_newest_age_seconds 0\n")
+		b.WriteString("flowforge_controlplane_replay_stats_error 1\n")
+		return b.String()
+	}
+
+	fmt.Fprintf(&b, "flowforge_controlplane_replay_rows %d\n", stats.RowCount)
+	fmt.Fprintf(&b, "flowforge_controlplane_replay_oldest_age_seconds %d\n", stats.OldestAgeSeconds)
+	fmt.Fprintf(&b, "flowforge_controlplane_replay_newest_age_seconds %d\n", stats.NewestAgeSeconds)
+	b.WriteString("flowforge_controlplane_replay_stats_error 0\n")
+	return b.String()
 }
 
 // HandleWorkerLifecycle exposes lifecycle control-plane state for operators/UI.

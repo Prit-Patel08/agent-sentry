@@ -160,6 +160,15 @@ Optional strict replay gate during release checkpoint:
 FLOWFORGE_REQUIRE_CONTROLPLANE_REPLAY_DRILL=1 ./scripts/release_checkpoint.sh
 ```
 
+Optional retention prune during release checkpoint:
+
+```bash
+FLOWFORGE_RUN_CONTROLPLANE_REPLAY_RETENTION=1 \
+FLOWFORGE_CONTROLPLANE_REPLAY_RETENTION_DAYS=30 \
+FLOWFORGE_CONTROLPLANE_REPLAY_MAX_ROWS=50000 \
+./scripts/release_checkpoint.sh
+```
+
 ## Issue Intake and Postmortem Templates
 
 Use GitHub issue forms:

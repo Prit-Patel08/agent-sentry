@@ -64,6 +64,35 @@ EOF
   chmod +x "$tmp_dir/scripts/controlplane_replay_drill.sh"
 }
 
+write_stub_controlplane_replay_retention() {
+  cat > "$tmp_dir/scripts/controlplane_replay_retention.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+out_dir=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --out)
+      out_dir="${2:-}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -z "$out_dir" ]]; then
+  echo "missing --out" >&2
+  exit 1
+fi
+mkdir -p "$out_dir"
+cat > "$out_dir/summary.tsv" <<'TSV'
+status	PASS
+TSV
+echo "stub replay retention pass"
+EOF
+  chmod +x "$tmp_dir/scripts/controlplane_replay_retention.sh"
+}
+
 write_required_docs() {
   for doc in RUNBOOK.md WEEK1_PILOT.md RELEASE_CHECKLIST.md ROLLBACK_CHECKLIST.md; do
     echo "# ${doc}" > "$tmp_dir/docs/$doc"
@@ -112,6 +141,16 @@ run_case_replay_required_passes() {
   )
   rg -q "Control-plane replay drill gate: PASS" "$tmp_dir/out-case-replay-pass/checkpoint.md"
   test -f "$tmp_dir/out-case-replay-pass/controlplane-replay-drill/summary.tsv"
+}
+
+run_case_replay_retention_enabled_passes() {
+  (
+    cd "$tmp_dir"
+    FLOWFORGE_RUN_CONTROLPLANE_REPLAY_RETENTION=1 \
+      ./scripts/release_checkpoint.sh "$tmp_dir/out-case-retention-pass" >/dev/null
+  )
+  rg -q "Control-plane replay retention prune: PASS" "$tmp_dir/out-case-retention-pass/checkpoint.md"
+  test -f "$tmp_dir/out-case-retention-pass/controlplane-replay-retention/summary.tsv"
 }
 
 run_case_cloud_required_unreachable_fails() {
@@ -228,12 +267,14 @@ run_case_cloud_required_mismatch_fails() {
 copy_repo_script
 write_stub_verify_local
 write_stub_controlplane_replay_drill
+write_stub_controlplane_replay_retention
 write_required_docs
 init_temp_git_repo
 
 run_case_no_cloud_required
 run_case_replay_required_missing_key_fails
 run_case_replay_required_passes
+run_case_replay_retention_enabled_passes
 run_case_cloud_required_unreachable_fails
 run_case_cloud_required_passes
 run_case_cloud_required_mismatch_fails

@@ -158,3 +158,46 @@ func TestPurgeControlPlaneReplaysByMaxRows(t *testing.T) {
 		t.Fatalf("expected newest keys preserved (4,3), got (%s,%s)", rows[0].IdempotencyKey, rows[1].IdempotencyKey)
 	}
 }
+
+func TestGetControlPlaneReplayStats(t *testing.T) {
+	_ = withTempDBPath(t)
+	CloseDB()
+	if err := InitDB(); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+
+	if err := InsertControlPlaneReplay("stats-key-old", "POST /process/restart", "stats-hash-old", 202, `{"status":"restart_requested"}`); err != nil {
+		t.Fatalf("insert old stats replay row: %v", err)
+	}
+	if err := InsertControlPlaneReplay("stats-key-new", "POST /process/kill", "stats-hash-new", 202, `{"status":"stop_requested"}`); err != nil {
+		t.Fatalf("insert new stats replay row: %v", err)
+	}
+	if _, err := db.Exec(`
+UPDATE control_plane_replays
+SET last_seen_at = datetime('now', '-5 day')
+WHERE idempotency_key = 'stats-key-old'
+`); err != nil {
+		t.Fatalf("age old row: %v", err)
+	}
+	if _, err := db.Exec(`
+UPDATE control_plane_replays
+SET last_seen_at = datetime('now')
+WHERE idempotency_key = 'stats-key-new'
+`); err != nil {
+		t.Fatalf("freshen new row: %v", err)
+	}
+
+	stats, err := GetControlPlaneReplayStats()
+	if err != nil {
+		t.Fatalf("GetControlPlaneReplayStats: %v", err)
+	}
+	if stats.RowCount != 2 {
+		t.Fatalf("expected row_count=2, got %d", stats.RowCount)
+	}
+	if stats.OldestAgeSeconds < 4*24*60*60 {
+		t.Fatalf("expected oldest_age_seconds to reflect aged row, got %d", stats.OldestAgeSeconds)
+	}
+	if stats.NewestAgeSeconds > 120 {
+		t.Fatalf("expected newest_age_seconds to be near-now, got %d", stats.NewestAgeSeconds)
+	}
+}

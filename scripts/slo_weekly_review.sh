@@ -10,6 +10,7 @@ API_BASE="${API_BASE:-http://127.0.0.1:8080}"
 DB_PATH="${FLOWFORGE_DB_PATH:-flowforge.db}"
 OUT_DIR=""
 FAIL_ON_BREACH=0
+REPLAY_MAX_ROWS=50000
 
 usage() {
   cat <<EOF
@@ -20,6 +21,7 @@ Options:
   --api-base URL       FlowForge API base URL (default: http://127.0.0.1:8080).
   --db PATH            SQLite DB path (default: FLOWFORGE_DB_PATH or flowforge.db).
   --out DIR            Output directory (default: pilot_artifacts/slo-weekly-<timestamp>).
+  --replay-max-rows N  Replay ledger row-cap target for SLO (default: 50000, <=0 disables check).
   --fail-on-breach     Exit non-zero if error budget status is RED.
   -h, --help           Show help text.
 EOF
@@ -43,6 +45,10 @@ while [[ $# -gt 0 ]]; do
       OUT_DIR="${2:-}"
       shift 2
       ;;
+    --replay-max-rows)
+      REPLAY_MAX_ROWS="${2:-}"
+      shift 2
+      ;;
     --fail-on-breach)
       FAIL_ON_BREACH=1
       shift
@@ -62,6 +68,14 @@ done
 if [[ ! "$DAYS" =~ ^[0-9]+$ ]] || [[ "$DAYS" -le 0 ]]; then
   echo "--days must be a positive integer (got: $DAYS)" >&2
   exit 1
+fi
+if [[ ! "$REPLAY_MAX_ROWS" =~ ^-?[0-9]+$ ]]; then
+  echo "--replay-max-rows must be an integer (got: $REPLAY_MAX_ROWS)" >&2
+  exit 1
+fi
+REPLAY_MAX_ROWS_TARGET_LABEL="$REPLAY_MAX_ROWS"
+if [[ "$REPLAY_MAX_ROWS" -le 0 ]]; then
+  REPLAY_MAX_ROWS_TARGET_LABEL="DISABLED"
 fi
 
 if [[ -z "$OUT_DIR" ]]; then
@@ -130,6 +144,14 @@ DECISION_EVENTS="$(sql_scalar "SELECT COUNT(*) FROM events WHERE ${EVENT_TIME_CO
 AUDIT_EVENTS="$(sql_scalar "SELECT COUNT(*) FROM events WHERE ${EVENT_TIME_COL} >= datetime('now', '${WINDOW}') AND event_type='audit';")"
 POLICY_DRY_RUN_EVENTS="$(sql_scalar "SELECT COUNT(*) FROM events WHERE ${EVENT_TIME_COL} >= datetime('now', '${WINDOW}') AND event_type='policy_dry_run';")"
 DISTINCT_INCIDENTS="$(sql_scalar "SELECT COUNT(DISTINCT incident_id) FROM events WHERE ${EVENT_TIME_COL} >= datetime('now', '${WINDOW}') AND incident_id IS NOT NULL AND incident_id != '';")"
+REPLAY_TABLE_EXISTS="$(sql_scalar "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='control_plane_replays';")"
+
+REPLAY_ROW_COUNT=0
+REPLAY_OLDEST_AGE_SECONDS=0
+if [[ "$REPLAY_TABLE_EXISTS" -eq 1 ]]; then
+  REPLAY_ROW_COUNT="$(sql_scalar "SELECT COUNT(*) FROM control_plane_replays;")"
+  REPLAY_OLDEST_AGE_SECONDS="$(sql_scalar "SELECT COALESCE(CAST((julianday('now') - julianday(MIN(last_seen_at))) * 86400 AS INTEGER), 0) FROM control_plane_replays;")"
+fi
 
 IDEMPOTENT_REPLAY_EVENTS="$(sql_scalar "
 SELECT COUNT(*) FROM events
@@ -316,17 +338,23 @@ KILL_TOTAL="N/A"
 RESTART_TOTAL="N/A"
 IDEMPOTENT_REPLAY_TOTAL="N/A"
 IDEMPOTENT_CONFLICT_TOTAL="N/A"
+REPLAY_ROWS_GAUGE="N/A"
+REPLAY_OLDEST_AGE_GAUGE="N/A"
 if [[ -f "$OUT_DIR/metrics.prom" ]]; then
   UPTIME_SECONDS="$(awk '/^flowforge_uptime_seconds /{print $2}' "$OUT_DIR/metrics.prom" | tail -n1)"
   KILL_TOTAL="$(awk '/^flowforge_process_kill_total /{print $2}' "$OUT_DIR/metrics.prom" | tail -n1)"
   RESTART_TOTAL="$(awk '/^flowforge_process_restart_total /{print $2}' "$OUT_DIR/metrics.prom" | tail -n1)"
   IDEMPOTENT_REPLAY_TOTAL="$(awk '/^flowforge_controlplane_idempotent_replay_total /{print $2}' "$OUT_DIR/metrics.prom" | tail -n1)"
   IDEMPOTENT_CONFLICT_TOTAL="$(awk '/^flowforge_controlplane_idempotency_conflict_total /{print $2}' "$OUT_DIR/metrics.prom" | tail -n1)"
+  REPLAY_ROWS_GAUGE="$(awk '/^flowforge_controlplane_replay_rows /{print $2}' "$OUT_DIR/metrics.prom" | tail -n1)"
+  REPLAY_OLDEST_AGE_GAUGE="$(awk '/^flowforge_controlplane_replay_oldest_age_seconds /{print $2}' "$OUT_DIR/metrics.prom" | tail -n1)"
   UPTIME_SECONDS="${UPTIME_SECONDS:-N/A}"
   KILL_TOTAL="${KILL_TOTAL:-N/A}"
   RESTART_TOTAL="${RESTART_TOTAL:-N/A}"
   IDEMPOTENT_REPLAY_TOTAL="${IDEMPOTENT_REPLAY_TOTAL:-N/A}"
   IDEMPOTENT_CONFLICT_TOTAL="${IDEMPOTENT_CONFLICT_TOTAL:-N/A}"
+  REPLAY_ROWS_GAUGE="${REPLAY_ROWS_GAUGE:-N/A}"
+  REPLAY_OLDEST_AGE_GAUGE="${REPLAY_OLDEST_AGE_GAUGE:-N/A}"
 fi
 
 slo_a_latency_status="NO_DATA"
@@ -335,6 +363,7 @@ slo_b_storm_status="PASS"
 slo_c_api_status="FAIL"
 slo_c_freshness_status="NO_DATA"
 slo_c_idempotency_status="PASS"
+slo_c_replay_capacity_status="NO_DATA"
 
 if [[ "$LATENCY_SAMPLE_COUNT" -gt 0 ]]; then
   if num_le "$LATENCY_P95" "15"; then
@@ -372,6 +401,14 @@ if [[ "$IDEMPOTENT_CONFLICT_EVENTS" -gt 0 ]]; then
   slo_c_idempotency_status="FAIL"
 fi
 
+if [[ "$REPLAY_MAX_ROWS" -gt 0 ]]; then
+  if num_le "$REPLAY_ROW_COUNT" "$REPLAY_MAX_ROWS"; then
+    slo_c_replay_capacity_status="PASS"
+  else
+    slo_c_replay_capacity_status="FAIL"
+  fi
+fi
+
 fail_count=0
 for st in \
   "$slo_a_latency_status" \
@@ -379,7 +416,8 @@ for st in \
   "$slo_b_storm_status" \
   "$slo_c_api_status" \
   "$slo_c_freshness_status" \
-  "$slo_c_idempotency_status"; do
+  "$slo_c_idempotency_status" \
+  "$slo_c_replay_capacity_status"; do
   if [[ "$st" == "FAIL" ]]; then
     fail_count=$((fail_count + 1))
   fi
@@ -397,12 +435,16 @@ run_timestamp	${RUN_TS}
 window_days	${DAYS}
 db_path	${DB_PATH}
 api_base	${API_BASE}
+replay_max_rows_target	${REPLAY_MAX_ROWS}
 total_events	${TOTAL_EVENTS}
 incident_events	${INCIDENT_EVENTS}
 decision_events	${DECISION_EVENTS}
 audit_events	${AUDIT_EVENTS}
 policy_dry_run_events	${POLICY_DRY_RUN_EVENTS}
 distinct_incidents	${DISTINCT_INCIDENTS}
+replay_table_exists	${REPLAY_TABLE_EXISTS}
+replay_row_count	${REPLAY_ROW_COUNT}
+replay_oldest_age_seconds	${REPLAY_OLDEST_AGE_SECONDS}
 idempotent_replay_events	${IDEMPOTENT_REPLAY_EVENTS}
 idempotent_conflict_events	${IDEMPOTENT_CONFLICT_EVENTS}
 destructive_actions	${DESTRUCTIVE_ACTIONS}
@@ -417,7 +459,10 @@ latest_event_age_seconds	${LATEST_EVENT_AGE_SECONDS}
 probe_failures	${probe_failures}
 controlplane_idempotent_replay_total	${IDEMPOTENT_REPLAY_TOTAL}
 controlplane_idempotency_conflict_total	${IDEMPOTENT_CONFLICT_TOTAL}
+controlplane_replay_rows_gauge	${REPLAY_ROWS_GAUGE}
+controlplane_replay_oldest_age_seconds_gauge	${REPLAY_OLDEST_AGE_GAUGE}
 slo_c_idempotency_status	${slo_c_idempotency_status}
+slo_c_replay_capacity_status	${slo_c_replay_capacity_status}
 error_budget_status	${ERROR_BUDGET_STATUS}
 EOF
 
@@ -439,6 +484,7 @@ cat >"$OUT_DIR/slo_weekly_report.md" <<EOF
 | API probe failures (\`/healthz,/readyz,/metrics,/timeline\`) | 0 | ${probe_failures} | ${slo_c_api_status} |
 | Latest event age | <= 300s | ${LATEST_EVENT_AGE_SECONDS}s | ${slo_c_freshness_status} |
 | Idempotency conflict events | 0 | ${IDEMPOTENT_CONFLICT_EVENTS} | ${slo_c_idempotency_status} |
+| Replay ledger rows | <= ${REPLAY_MAX_ROWS_TARGET_LABEL} | ${REPLAY_ROW_COUNT} | ${slo_c_replay_capacity_status} |
 
 ## Error Budget Decision
 
@@ -455,6 +501,8 @@ Policy:
 - Distinct incidents: ${DISTINCT_INCIDENTS}
 - Idempotent replay events: ${IDEMPOTENT_REPLAY_EVENTS}
 - Idempotent conflict events: ${IDEMPOTENT_CONFLICT_EVENTS}
+- Replay ledger rows (DB): ${REPLAY_ROW_COUNT}
+- Replay ledger oldest age (DB): ${REPLAY_OLDEST_AGE_SECONDS}s
 - Incident events: ${INCIDENT_EVENTS}
 - Decision events: ${DECISION_EVENTS}
 - Audit events: ${AUDIT_EVENTS}
@@ -467,6 +515,8 @@ Policy:
 - Process restart total (probe time): ${RESTART_TOTAL}
 - Control-plane replay total (probe time): ${IDEMPOTENT_REPLAY_TOTAL}
 - Control-plane conflict total (probe time): ${IDEMPOTENT_CONFLICT_TOTAL}
+- Control-plane replay rows (probe time): ${REPLAY_ROWS_GAUGE}
+- Control-plane replay oldest age (probe time): ${REPLAY_OLDEST_AGE_GAUGE}
 
 ## Weekly Ritual Checklist
 
