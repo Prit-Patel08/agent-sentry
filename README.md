@@ -174,6 +174,7 @@ If `govulncheck` reports Go standard library advisories, upgrade your local Go p
 Release checkpoint contract tests: `./scripts/release_checkpoint_contract_test.sh`.
 CI also enforces `shellcheck` for `scripts/*.sh`.
 ShellCheck policy is pinned in repo at `.shellcheckrc`.
+Run local toolchain diagnostics: `./scripts/tooling_doctor.sh` (or `--strict`).
 Fast local pre-commit checks: `./scripts/precommit_checks.sh`.
 Install a managed git pre-commit hook: `./scripts/install_git_hook.sh`.
 Install strict hook mode: `./scripts/install_git_hook.sh --strict`.

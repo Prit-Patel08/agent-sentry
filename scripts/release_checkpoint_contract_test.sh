@@ -61,10 +61,20 @@ run_case_no_cloud_required() {
 }
 
 run_case_cloud_required_unreachable_fails() {
+  local unreachable_port
+  unreachable_port="$(python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+)"
+
   set +e
   (
     cd "$tmp_dir"
-    FLOWFORGE_CLOUD_DEPS_REQUIRED=1 FLOWFORGE_API_BASE=http://127.0.0.1:65531 \
+    FLOWFORGE_CLOUD_DEPS_REQUIRED=1 FLOWFORGE_API_BASE="http://127.0.0.1:${unreachable_port}" \
       ./scripts/release_checkpoint.sh "$tmp_dir/out-case-2"
   ) >"$tmp_dir/case2.stdout.log" 2>"$tmp_dir/case2.stderr.log"
   rc=$?
@@ -77,12 +87,16 @@ run_case_cloud_required_unreachable_fails() {
 }
 
 start_mock_ready_server() {
-  local port="$1"
-  local body="$2"
+  local body="$1"
+  local port_file="$tmp_dir/mock_readyz_port.txt"
+  rm -f "$port_file"
+
   cat > "$tmp_dir/mock_readyz_server.py" <<EOF
+import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-BODY = b'''${body}'''
+BODY = os.environ["RESPONSE_BODY"].encode("utf-8")
+PORT_FILE = os.environ["PORT_FILE"]
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -99,21 +113,36 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         return
 
-HTTPServer(("127.0.0.1", ${port}), Handler).serve_forever()
+server = HTTPServer(("127.0.0.1", 0), Handler)
+with open(PORT_FILE, "w", encoding="utf-8") as f:
+    f.write(str(server.server_port))
+server.serve_forever()
 EOF
-  python3 "$tmp_dir/mock_readyz_server.py" >/dev/null 2>&1 &
+  PORT_FILE="$port_file" RESPONSE_BODY="$body" python3 "$tmp_dir/mock_readyz_server.py" >/dev/null 2>&1 &
   server_pid=$!
-  sleep 1
+
+  server_port=""
+  for _ in $(seq 1 40); do
+    if [[ -s "$port_file" ]]; then
+      server_port="$(cat "$port_file")"
+      break
+    fi
+    sleep 0.05
+  done
+
+  if [[ -z "$server_port" ]]; then
+    echo "failed to start mock readyz server" >&2
+    stop_mock_ready_server
+    exit 1
+  fi
 }
 
 run_case_cloud_required_passes() {
-  start_mock_ready_server \
-    65530 \
-    '{"status":"ready","cloud_dependencies_required":true,"checks":{"database":{"healthy":true}}}'
+  start_mock_ready_server '{"status":"ready","cloud_dependencies_required":true,"checks":{"database":{"healthy":true}}}'
 
   (
     cd "$tmp_dir"
-    FLOWFORGE_CLOUD_DEPS_REQUIRED=1 FLOWFORGE_API_BASE=http://127.0.0.1:65530 \
+    FLOWFORGE_CLOUD_DEPS_REQUIRED=1 FLOWFORGE_API_BASE="http://127.0.0.1:${server_port}" \
       ./scripts/release_checkpoint.sh "$tmp_dir/out-case-3" >/dev/null
   )
   rg -q "Cloud dependency readiness gate: PASS" "$tmp_dir/out-case-3/checkpoint.md"
@@ -123,14 +152,12 @@ run_case_cloud_required_passes() {
 }
 
 run_case_cloud_required_mismatch_fails() {
-  start_mock_ready_server \
-    65529 \
-    '{"status":"ready","cloud_dependencies_required":false,"checks":{"database":{"healthy":true}}}'
+  start_mock_ready_server '{"status":"ready","cloud_dependencies_required":false,"checks":{"database":{"healthy":true}}}'
 
   set +e
   (
     cd "$tmp_dir"
-    FLOWFORGE_CLOUD_DEPS_REQUIRED=1 FLOWFORGE_API_BASE=http://127.0.0.1:65529 \
+    FLOWFORGE_CLOUD_DEPS_REQUIRED=1 FLOWFORGE_API_BASE="http://127.0.0.1:${server_port}" \
       ./scripts/release_checkpoint.sh "$tmp_dir/out-case-4"
   ) >"$tmp_dir/case4.stdout.log" 2>"$tmp_dir/case4.stderr.log"
   rc=$?

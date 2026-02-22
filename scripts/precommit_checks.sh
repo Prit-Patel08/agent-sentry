@@ -36,12 +36,23 @@ echo "Strict mode: $STRICT_MODE"
 
 cd "$ROOT_DIR"
 
-echo "[1/3] Bash syntax: scripts/*.sh"
+echo "[1/4] Tooling doctor"
+doctor_args=()
+if [[ "$STRICT_MODE" == "1" ]]; then
+  doctor_args+=(--strict)
+fi
+if (( ${#doctor_args[@]} > 0 )); then
+  ./scripts/tooling_doctor.sh "${doctor_args[@]}"
+else
+  ./scripts/tooling_doctor.sh
+fi
+
+echo "[2/4] Bash syntax: scripts/*.sh"
 for script in scripts/*.sh; do
   bash -n "$script"
 done
 
-echo "[2/3] ShellCheck: scripts/*.sh"
+echo "[3/4] ShellCheck: scripts/*.sh"
 if command -v shellcheck >/dev/null 2>&1; then
   shellcheck scripts/*.sh
 else
@@ -52,7 +63,7 @@ else
   echo "WARN: shellcheck not installed; skipping (use --strict to fail instead)."
 fi
 
-echo "[3/3] Release checkpoint contract tests"
+echo "[4/4] Release checkpoint contract tests"
 ./scripts/release_checkpoint_contract_test.sh
 
 echo "✅ Pre-commit checks passed"

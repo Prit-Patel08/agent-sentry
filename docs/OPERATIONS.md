@@ -62,6 +62,7 @@ Run strict local verification before release actions:
 Optional local commit gate:
 
 ```bash
+./scripts/tooling_doctor.sh
 ./scripts/precommit_checks.sh
 ./scripts/install_git_hook.sh
 ./scripts/install_git_hook.sh --strict
