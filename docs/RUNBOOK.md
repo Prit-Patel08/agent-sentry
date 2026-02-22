@@ -82,8 +82,9 @@ Guardrail:
 
 Blocked restart response contract:
 - HTTP `429`
+- header: `X-Request-Id: <id>`
 - header: `Retry-After: <seconds>`
-- body (Problem Details): `{"type":"about:blank","title":"Too Many Requests","status":429,"detail":"restart budget exceeded: ...","instance":"/v1/process/restart","retry_after_seconds":<n>}`
+- body (Problem Details): `{"type":"https://flowforge.dev/problems/restart-budget-exceeded","title":"Too Many Requests","status":429,"detail":"restart budget exceeded: ...","instance":"/v1/process/restart","request_id":"<id>","retry_after_seconds":<n>}`
 
 ```bash
 curl -X POST \

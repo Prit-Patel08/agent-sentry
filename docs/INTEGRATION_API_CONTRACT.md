@@ -143,16 +143,18 @@ Errors use RFC 7807 Problem Details (`Content-Type: application/problem+json`).
 
 ```json
 {
-  "type": "about:blank",
+  "type": "https://flowforge.dev/problems/idempotency-conflict",
   "title": "Conflict",
   "status": 409,
   "detail": "human-readable error message",
-  "instance": "/v1/integrations/workspaces/ws-123/actions"
+  "instance": "/v1/integrations/workspaces/ws-123/actions",
+  "request_id": "req_1234abcd"
 }
 ```
 
 Compatibility note:
 - `error` field is still present with the same value as `detail` for legacy clients.
+- Response also echoes `X-Request-Id`; clients should pass their own value for cross-system correlation.
 
 Common codes:
 - `bad_request`

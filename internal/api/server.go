@@ -35,6 +35,15 @@ var (
 	}
 )
 
+type requestContextKey string
+
+const (
+	requestIDContextKey requestContextKey = "flowforge_request_id"
+	requestIDHeader                       = "X-Request-Id"
+	maxRequestIDLength                    = 128
+	problemTypeBaseURI                    = "https://flowforge.dev/problems/"
+)
+
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -85,6 +94,10 @@ func withSecurity(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		corsMiddleware(rec, r)
+		r = withRequestID(r)
+		if rid := requestIDFromRequest(r); rid != "" {
+			rec.Header().Set(requestIDHeader, rid)
+		}
 
 		if r.Method == "OPTIONS" {
 			rec.WriteHeader(http.StatusOK)
@@ -141,6 +154,76 @@ func requireAuth(w http.ResponseWriter, r *http.Request) bool {
 
 	apiLimiter.clearAuthFailures(ip)
 	return true
+}
+
+func withRequestID(r *http.Request) *http.Request {
+	if r == nil {
+		return r
+	}
+	if existing := requestIDFromRequest(r); existing != "" {
+		ctx := context.WithValue(r.Context(), requestIDContextKey, existing)
+		return r.WithContext(ctx)
+	}
+	rid := strings.TrimSpace(r.Header.Get(requestIDHeader))
+	if !isValidRequestID(rid) {
+		rid = ""
+	}
+	if rid == "" {
+		rid = "req_" + uuid.NewString()
+	}
+	ctx := context.WithValue(r.Context(), requestIDContextKey, rid)
+	return r.WithContext(ctx)
+}
+
+func ensureRequestContext(w http.ResponseWriter, r *http.Request) *http.Request {
+	r = withRequestID(r)
+	if w != nil {
+		if rid := requestIDFromRequest(r); rid != "" {
+			w.Header().Set(requestIDHeader, rid)
+		}
+	}
+	return r
+}
+
+func isValidRequestID(id string) bool {
+	if id == "" || len(id) > maxRequestIDLength {
+		return false
+	}
+	for _, ch := range id {
+		if ch < 33 || ch > 126 {
+			return false
+		}
+	}
+	return true
+}
+
+func requestIDFromRequest(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if rid, ok := r.Context().Value(requestIDContextKey).(string); ok && isValidRequestID(strings.TrimSpace(rid)) {
+		return strings.TrimSpace(rid)
+	}
+	rid := strings.TrimSpace(r.Header.Get(requestIDHeader))
+	if isValidRequestID(rid) {
+		return rid
+	}
+	return ""
+}
+
+func annotateReasonWithRequestID(reason string, r *http.Request) string {
+	rid := requestIDFromRequest(r)
+	if rid == "" {
+		return reason
+	}
+	trimmed := strings.TrimSpace(reason)
+	if strings.Contains(trimmed, "request_id=") {
+		return trimmed
+	}
+	if trimmed == "" {
+		return fmt.Sprintf("request_id=%s", rid)
+	}
+	return fmt.Sprintf("%s [request_id=%s]", trimmed, rid)
 }
 
 func StartServer(port string) {
@@ -274,6 +357,7 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 // HandleHealth returns process health for container liveness.
 func HandleHealth(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w, r)
+	r = ensureRequestContext(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -289,6 +373,7 @@ func HandleHealth(w http.ResponseWriter, r *http.Request) {
 // HandleReady checks DB readiness for startup probes.
 func HandleReady(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w, r)
+	r = ensureRequestContext(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -342,6 +427,7 @@ func HandleReady(w http.ResponseWriter, r *http.Request) {
 // HandleMetrics emits Prometheus-style metrics.
 func HandleMetrics(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w, r)
+	r = ensureRequestContext(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -360,6 +446,7 @@ func HandleMetrics(w http.ResponseWriter, r *http.Request) {
 // HandleControlPlaneReplayHistory exposes replay/conflict event trend for recent days.
 func HandleControlPlaneReplayHistory(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w, r)
+	r = ensureRequestContext(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -447,6 +534,7 @@ func controlPlaneReplayPrometheus() string {
 // HandleWorkerLifecycle exposes lifecycle control-plane state for operators/UI.
 func HandleWorkerLifecycle(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w, r)
+	r = ensureRequestContext(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -472,6 +560,7 @@ func HandleWorkerLifecycle(w http.ResponseWriter, r *http.Request) {
 
 func HandleTimeline(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w, r)
+	r = ensureRequestContext(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -515,6 +604,7 @@ func HandleTimeline(w http.ResponseWriter, r *http.Request) {
 // HandleIncidents is exported for testing.
 func HandleIncidents(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w, r)
+	r = ensureRequestContext(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -547,6 +637,7 @@ func HandleIncidents(w http.ResponseWriter, r *http.Request) {
 // HandleProcessKill is exported for testing.
 func HandleProcessKill(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w, r)
+	r = ensureRequestContext(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -583,7 +674,7 @@ func HandleProcessKill(w http.ResponseWriter, r *http.Request) {
 	if decision.AcceptedNew {
 		apiMetrics.IncProcessKill()
 		incidentID := uuid.NewString()
-		_ = database.LogAuditEventWithIncident(actorFromRequest(r), "KILL", reason, "api", decision.PID, stats.Command, incidentID)
+		_ = database.LogAuditEventWithIncident(actorFromRequest(r), "KILL", annotateReasonWithRequestID(reason, r), "api", decision.PID, stats.Command, incidentID)
 	}
 	payload := map[string]interface{}{
 		"status":    decision.Status,
@@ -597,6 +688,7 @@ func HandleProcessKill(w http.ResponseWriter, r *http.Request) {
 // HandleProcessRestart is exported for testing.
 func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w, r)
+	r = ensureRequestContext(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -626,7 +718,7 @@ func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 		if statusCode == http.StatusTooManyRequests {
 			stats := state.GetState()
 			incidentID := uuid.NewString()
-			_ = database.LogAuditEventWithIncident(actorFromRequest(r), "RESTART_BLOCKED", msg, "api", stats.PID, stats.Command, incidentID)
+			_ = database.LogAuditEventWithIncident(actorFromRequest(r), "RESTART_BLOCKED", annotateReasonWithRequestID(msg, r), "api", stats.PID, stats.Command, incidentID)
 		}
 		if retryAfter := lifecycleRetryAfter(err); retryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
@@ -645,7 +737,7 @@ func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 	if decision.AcceptedNew {
 		apiMetrics.IncProcessRestart()
 		incidentID := uuid.NewString()
-		_ = database.LogAuditEventWithIncident(actorFromRequest(r), "RESTART", reason, "api", decision.PID, stats.Command, incidentID)
+		_ = database.LogAuditEventWithIncident(actorFromRequest(r), "RESTART", annotateReasonWithRequestID(reason, r), "api", decision.PID, stats.Command, incidentID)
 	}
 	payload := map[string]interface{}{
 		"status":    decision.Status,
@@ -690,9 +782,44 @@ func writeJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
 	}
 }
 
+func problemTypeURI(statusCode int, detail string) string {
+	detailLower := strings.ToLower(strings.TrimSpace(detail))
+	switch statusCode {
+	case http.StatusBadRequest:
+		return problemTypeBaseURI + "bad-request"
+	case http.StatusUnauthorized:
+		return problemTypeBaseURI + "unauthorized"
+	case http.StatusForbidden:
+		return problemTypeBaseURI + "forbidden"
+	case http.StatusNotFound:
+		return problemTypeBaseURI + "not-found"
+	case http.StatusMethodNotAllowed:
+		return problemTypeBaseURI + "method-not-allowed"
+	case http.StatusConflict:
+		if strings.Contains(detailLower, "idempotency") {
+			return problemTypeBaseURI + "idempotency-conflict"
+		}
+		return problemTypeBaseURI + "conflict"
+	case http.StatusTooManyRequests:
+		if strings.Contains(detailLower, "restart budget") {
+			return problemTypeBaseURI + "restart-budget-exceeded"
+		}
+		if strings.Contains(detailLower, "auth attempt") {
+			return problemTypeBaseURI + "auth-rate-limited"
+		}
+		return problemTypeBaseURI + "rate-limited"
+	case http.StatusServiceUnavailable:
+		return problemTypeBaseURI + "not-ready"
+	case http.StatusInternalServerError:
+		return problemTypeBaseURI + "internal"
+	default:
+		return problemTypeBaseURI + "http-" + strconv.Itoa(statusCode)
+	}
+}
+
 func problemPayload(r *http.Request, statusCode int, detail string, extra map[string]interface{}) map[string]interface{} {
 	payload := map[string]interface{}{
-		"type":   "about:blank",
+		"type":   problemTypeURI(statusCode, detail),
 		"title":  http.StatusText(statusCode),
 		"status": statusCode,
 	}
@@ -709,6 +836,9 @@ func problemPayload(r *http.Request, statusCode int, detail string, extra map[st
 			payload["instance"] = instance
 		}
 	}
+	if rid := requestIDFromRequest(r); rid != "" {
+		payload["request_id"] = rid
+	}
 	for k, v := range extra {
 		payload[k] = v
 	}
@@ -724,6 +854,12 @@ func writeProblem(w http.ResponseWriter, statusCode int, payload map[string]inte
 }
 
 func writeJSONErrorForRequest(w http.ResponseWriter, r *http.Request, statusCode int, msg string) {
+	if r != nil {
+		r = withRequestID(r)
+		if rid := requestIDFromRequest(r); rid != "" {
+			w.Header().Set(requestIDHeader, rid)
+		}
+	}
 	writeProblem(w, statusCode, problemPayload(r, statusCode, msg, nil))
 }
 

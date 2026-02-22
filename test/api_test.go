@@ -732,6 +732,7 @@ func TestProcessKillIdempotencyReplayAndConflict(t *testing.T) {
 	req1.Header.Set("Authorization", "Bearer test-secret-key-12345")
 	req1.Header.Set("Content-Type", "application/json")
 	req1.Header.Set("Idempotency-Key", key)
+	req1.Header.Set("X-Request-Id", "req-test-kill-idem")
 	w1 := httptest.NewRecorder()
 	api.HandleProcessKill(w1, req1)
 	status1 := w1.Result().StatusCode
@@ -748,6 +749,7 @@ func TestProcessKillIdempotencyReplayAndConflict(t *testing.T) {
 	req2.Header.Set("Authorization", "Bearer test-secret-key-12345")
 	req2.Header.Set("Content-Type", "application/json")
 	req2.Header.Set("Idempotency-Key", key)
+	req2.Header.Set("X-Request-Id", "req-test-kill-idem")
 	w2 := httptest.NewRecorder()
 	api.HandleProcessKill(w2, req2)
 
@@ -770,6 +772,7 @@ func TestProcessKillIdempotencyReplayAndConflict(t *testing.T) {
 	req3.Header.Set("Authorization", "Bearer test-secret-key-12345")
 	req3.Header.Set("Content-Type", "application/json")
 	req3.Header.Set("Idempotency-Key", key)
+	req3.Header.Set("X-Request-Id", "req-test-kill-idem")
 	w3 := httptest.NewRecorder()
 	api.HandleProcessKill(w3, req3)
 	if w3.Result().StatusCode != http.StatusConflict {
@@ -790,6 +793,25 @@ func TestProcessKillIdempotencyReplayAndConflict(t *testing.T) {
 	}
 	if rec.ReplayCount != 1 {
 		t.Fatalf("expected replay_count=1, got %d", rec.ReplayCount)
+	}
+
+	audits, err := database.GetAuditEvents(10)
+	if err != nil {
+		t.Fatalf("GetAuditEvents: %v", err)
+	}
+	foundConflict := false
+	for _, ev := range audits {
+		if ev.Action != "IDEMPOTENT_CONFLICT" {
+			continue
+		}
+		foundConflict = true
+		if !strings.Contains(ev.Reason, "request_id=req-test-kill-idem") {
+			t.Fatalf("expected idempotency conflict reason to include request id, got %q", ev.Reason)
+		}
+		break
+	}
+	if !foundConflict {
+		t.Fatalf("expected IDEMPOTENT_CONFLICT audit event in recent history")
 	}
 }
 
@@ -1122,6 +1144,7 @@ func TestControlPlaneReplayHistoryEndpointRejectsInvalidDays(t *testing.T) {
 	}
 	for _, path := range cases {
 		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("X-Request-Id", "req-test-invalid-days")
 		w := httptest.NewRecorder()
 		api.HandleControlPlaneReplayHistory(w, req)
 		resp := w.Result()
@@ -1142,8 +1165,17 @@ func TestControlPlaneReplayHistoryEndpointRejectsInvalidDays(t *testing.T) {
 		if got := intValue(payload["status"]); got != http.StatusBadRequest {
 			t.Fatalf("path %s expected status field 400, got %d", path, got)
 		}
+		if typeURI := stringValue(payload["type"]); typeURI != "https://flowforge.dev/problems/bad-request" {
+			t.Fatalf("path %s expected bad-request type URI, got %q", path, typeURI)
+		}
 		if instance := stringValue(payload["instance"]); instance != "/v1/ops/controlplane/replay/history" {
 			t.Fatalf("path %s expected instance /v1/ops/controlplane/replay/history, got %q", path, instance)
+		}
+		if reqID := stringValue(payload["request_id"]); reqID != "req-test-invalid-days" {
+			t.Fatalf("path %s expected request_id req-test-invalid-days, got %q", path, reqID)
+		}
+		if headerReqID := resp.Header.Get("X-Request-Id"); headerReqID != "req-test-invalid-days" {
+			t.Fatalf("path %s expected X-Request-Id req-test-invalid-days, got %q", path, headerReqID)
 		}
 		errMsg := strings.ToLower(problemDetail(payload))
 		if !strings.Contains(errMsg, "days must be an integer between 1 and 90") {
@@ -1200,6 +1232,7 @@ func TestV1ProcessKillAliasRequiresAuth(t *testing.T) {
 
 	handler := api.NewHandler()
 	req := httptest.NewRequest(http.MethodPost, "/v1/process/kill", nil)
+	req.Header.Set("X-Request-Id", "req-test-kill-auth")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -1221,8 +1254,17 @@ func TestV1ProcessKillAliasRequiresAuth(t *testing.T) {
 	if got := intValue(payload["status"]); got != http.StatusUnauthorized {
 		t.Fatalf("expected status field 401, got %d", got)
 	}
+	if typeURI := stringValue(payload["type"]); typeURI != "https://flowforge.dev/problems/unauthorized" {
+		t.Fatalf("expected unauthorized type URI, got %q", typeURI)
+	}
 	if instance := stringValue(payload["instance"]); instance != "/v1/process/kill" {
 		t.Fatalf("expected instance /v1/process/kill, got %q", instance)
+	}
+	if reqID := stringValue(payload["request_id"]); reqID != "req-test-kill-auth" {
+		t.Fatalf("expected request_id req-test-kill-auth, got %q", reqID)
+	}
+	if headerReqID := resp.Header.Get("X-Request-Id"); headerReqID != "req-test-kill-auth" {
+		t.Fatalf("expected X-Request-Id req-test-kill-auth, got %q", headerReqID)
 	}
 	if detail := strings.ToLower(problemDetail(payload)); !strings.Contains(detail, "authorization required") {
 		t.Fatalf("expected auth-required detail, got payload=%#v", payload)

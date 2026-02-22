@@ -36,6 +36,7 @@ type workspaceActionRequest struct {
 
 func HandleIntegrationWorkspaceRegister(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w, r)
+	r = ensureRequestContext(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -61,7 +62,9 @@ func HandleIntegrationWorkspaceRegister(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, status, payload)
 	}
 	respondErr := func(status int, msg string) {
-		respond(status, problemPayload(r, status, msg, nil))
+		payload := problemPayload(r, status, msg, nil)
+		persistIdempotentMutation(idemCtx, status, payload)
+		writeProblem(w, status, payload)
 	}
 
 	var req registerWorkspaceRequest
@@ -96,7 +99,7 @@ func HandleIntegrationWorkspaceRegister(w http.ResponseWriter, r *http.Request) 
 	}
 
 	reason := fmt.Sprintf("workspace registered via integration API: %s", ws.WorkspaceID)
-	_, _ = database.LogAuditEventWithIncidentAndID(actorFromRequest(r), "WORKSPACE_REGISTER", reason, "integration", state.GetState().PID, ws.WorkspacePath, "")
+	_, _ = database.LogAuditEventWithIncidentAndID(actorFromRequest(r), "WORKSPACE_REGISTER", annotateReasonWithRequestID(reason, r), "integration", state.GetState().PID, ws.WorkspacePath, "")
 
 	respond(http.StatusOK, map[string]interface{}{
 		"ok":           true,
@@ -107,6 +110,7 @@ func HandleIntegrationWorkspaceRegister(w http.ResponseWriter, r *http.Request) 
 
 func HandleIntegrationWorkspaceScoped(w http.ResponseWriter, r *http.Request) {
 	corsMiddleware(w, r)
+	r = ensureRequestContext(w, r)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -215,7 +219,9 @@ func handleIntegrationWorkspaceProtection(w http.ResponseWriter, r *http.Request
 		writeJSON(w, status, payload)
 	}
 	respondErr := func(status int, msg string) {
-		respond(status, problemPayload(r, status, msg, nil))
+		payload := problemPayload(r, status, msg, nil)
+		persistIdempotentMutation(idemCtx, status, payload)
+		writeProblem(w, status, payload)
 	}
 
 	var req setProtectionRequest
@@ -242,6 +248,7 @@ func handleIntegrationWorkspaceProtection(w http.ResponseWriter, r *http.Request
 	if reason == "" {
 		reason = fmt.Sprintf("workspace protection set to %t", ws.ProtectionEnabled)
 	}
+	reason = annotateReasonWithRequestID(reason, r)
 	_, _ = database.LogAuditEventWithIncidentAndID(actorFromRequest(r), "PROTECTION_UPDATE", reason, "integration", state.GetState().PID, workspaceID, "")
 
 	respond(http.StatusOK, map[string]interface{}{
@@ -269,7 +276,9 @@ func handleIntegrationWorkspaceActions(w http.ResponseWriter, r *http.Request, w
 		writeJSON(w, status, payload)
 	}
 	respondErr := func(status int, msg string) {
-		respond(status, problemPayload(r, status, msg, nil))
+		payload := problemPayload(r, status, msg, nil)
+		persistIdempotentMutation(idemCtx, status, payload)
+		writeProblem(w, status, payload)
 	}
 
 	ws, err := database.GetIntegrationWorkspace(workspaceID)
@@ -314,7 +323,9 @@ func handleIntegrationWorkspaceActions(w http.ResponseWriter, r *http.Request, w
 		msg := lifecycleErrorMessage(reqErr, "failed to request action")
 		if retryAfter := lifecycleRetryAfter(reqErr); retryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-			respond(statusCode, problemPayload(r, statusCode, msg, map[string]interface{}{"retry_after_seconds": retryAfter}))
+			payload := problemPayload(r, statusCode, msg, map[string]interface{}{"retry_after_seconds": retryAfter})
+			persistIdempotentMutation(idemCtx, statusCode, payload)
+			writeProblem(w, statusCode, payload)
 			return
 		}
 		respondErr(statusCode, msg)
@@ -325,6 +336,7 @@ func handleIntegrationWorkspaceActions(w http.ResponseWriter, r *http.Request, w
 	if reason == "" {
 		reason = fmt.Sprintf("integration workspace %s requested %s", workspaceID, action)
 	}
+	reason = annotateReasonWithRequestID(reason, r)
 	actionLabel := strings.ToUpper("INTEGRATION_" + action)
 	auditEventID, err := database.LogAuditEventWithIncidentAndID(actorFromRequest(r), actionLabel, reason, "integration", decision.PID, workspaceID, "")
 	if err != nil {

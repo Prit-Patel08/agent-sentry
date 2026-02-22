@@ -50,14 +50,14 @@ func beginIdempotentMutation(w http.ResponseWriter, r *http.Request, endpoint st
 	if err == nil {
 		if strings.TrimSpace(record.RequestHash) != requestHash {
 			apiMetrics.IncControlPlaneIdempotencyConflict()
-			_ = database.LogAuditEvent("control-plane", "IDEMPOTENT_CONFLICT", "idempotency key reused with different request payload", "api", 0, endpoint)
+			_ = database.LogAuditEvent("control-plane", "IDEMPOTENT_CONFLICT", annotateReasonWithRequestID("idempotency key reused with different request payload", r), "api", 0, endpoint)
 			writeJSONErrorForRequest(w, r, http.StatusConflict, "idempotency key reused with different request payload")
 			return nil, true
 		}
 
 		_ = database.TouchControlPlaneReplay(record.ID)
 		apiMetrics.IncControlPlaneIdempotentReplay()
-		_ = database.LogAuditEvent("control-plane", "IDEMPOTENT_REPLAY", "served cached control-plane mutation response", "api", 0, endpoint)
+		_ = database.LogAuditEvent("control-plane", "IDEMPOTENT_REPLAY", annotateReasonWithRequestID("served cached control-plane mutation response", r), "api", 0, endpoint)
 		w.Header().Set("X-Idempotent-Replay", "true")
 		writeRawJSON(w, record.ResponseStatus, record.ResponseBody)
 		return nil, true
