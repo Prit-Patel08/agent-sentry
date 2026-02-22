@@ -146,6 +146,22 @@ interface ReplayHistory {
   points: ReplayHistoryPoint[];
 }
 
+interface RequestTraceEvent {
+  event_id: string;
+  created_at: string;
+  event_type: string;
+  title: string;
+  actor: string;
+  incident_id: string;
+  reason_text: string;
+}
+
+interface RequestTraceResponse {
+  request_id: string;
+  count: number;
+  events: RequestTraceEvent[];
+}
+
 const REPLAY_ROW_CAP_TARGET = 50000;
 
 export default function Dashboard() {
@@ -253,6 +269,11 @@ export default function Dashboard() {
   const [restartStatus, setRestartStatus] = useState<string | null>(null);
   const [restartStatusIsError, setRestartStatusIsError] = useState(false);
   const [restartRequestID, setRestartRequestID] = useState<string | null>(null);
+  const [requestTraceQuery, setRequestTraceQuery] = useState('');
+  const [requestTraceResult, setRequestTraceResult] = useState<RequestTraceResponse | null>(null);
+  const [requestTraceError, setRequestTraceError] = useState<string | null>(null);
+  const [requestTraceErrorRequestID, setRequestTraceErrorRequestID] = useState<string | null>(null);
+  const [requestTraceLoading, setRequestTraceLoading] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -374,6 +395,68 @@ export default function Dashboard() {
         : latestActionedIncident?.exit_reason === 'SAFETY_LIMIT_EXCEEDED'
           ? 'FlowForge enforced a safety limit and stopped the process.'
           : 'FlowForge recorded an action for this process.';
+
+  const handleRequestTraceLookup = async (): Promise<void> => {
+    const requestID = requestTraceQuery.trim();
+    if (!requestID) {
+      setRequestTraceResult(null);
+      setRequestTraceError('Enter a request_id to query correlated events.');
+      setRequestTraceErrorRequestID(null);
+      return;
+    }
+
+    setRequestTraceLoading(true);
+    setRequestTraceError(null);
+    setRequestTraceErrorRequestID(null);
+
+    try {
+      const res = await fetch(`${API_BASE}/v1/ops/requests/${encodeURIComponent(requestID)}?limit=200`);
+      const data = await res.json().catch(() => ({} as Record<string, unknown>));
+      if (!res.ok) {
+        const errorRequestID = readAPIRequestID(data);
+        if (errorRequestID) {
+          setRequestTraceErrorRequestID(errorRequestID);
+        }
+        throw new Error(readAPIErrorMessage(data, res.status));
+      }
+
+      const payload = data && typeof data === 'object' ? data as Record<string, unknown> : {};
+      const rid = typeof payload.request_id === 'string' && payload.request_id.trim() !== ''
+        ? payload.request_id.trim()
+        : requestID;
+      const rawEvents = Array.isArray(payload.events) ? payload.events : [];
+      const events = rawEvents
+        .map((raw): RequestTraceEvent | null => {
+          if (!raw || typeof raw !== 'object') {
+            return null;
+          }
+          const event = raw as Record<string, unknown>;
+          return {
+            event_id: typeof event.event_id === 'string' ? event.event_id : '',
+            created_at: typeof event.created_at === 'string' ? event.created_at : '',
+            event_type: typeof event.event_type === 'string' ? event.event_type : '',
+            title: typeof event.title === 'string' ? event.title : '',
+            actor: typeof event.actor === 'string' ? event.actor : '',
+            incident_id: typeof event.incident_id === 'string' ? event.incident_id : '',
+            reason_text: typeof event.reason_text === 'string' ? event.reason_text : ''
+          };
+        })
+        .filter((event): event is RequestTraceEvent => event !== null);
+
+      const response: RequestTraceResponse = {
+        request_id: rid,
+        count: typeof payload.count === 'number' && Number.isFinite(payload.count) ? payload.count : events.length,
+        events
+      };
+      setRequestTraceResult(response);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Request-trace lookup failed';
+      setRequestTraceResult(null);
+      setRequestTraceError(msg);
+    } finally {
+      setRequestTraceLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-obsidian-900 text-gray-100 font-sans selection:bg-accent-500/30">
@@ -804,6 +887,97 @@ export default function Dashboard() {
                   </div>
                   <p className="mt-2 text-[11px] text-gray-500">format: replay/conflict (total)</p>
                 </div>
+              </div>
+              <div className="rounded-xl border border-gray-800 bg-gray-900/40 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold tracking-wide text-gray-200">Request Trace Lookup</h3>
+                  {requestTraceLoading && (
+                    <span className="text-[11px] font-mono text-gray-400">loading...</span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={requestTraceQuery}
+                    onChange={(e) => setRequestTraceQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        void handleRequestTraceLookup();
+                      }
+                    }}
+                    placeholder="req_..."
+                    className="flex-1 rounded-md border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-200 focus:border-accent-500 focus:outline-none"
+                  />
+                  <button
+                    onClick={() => void handleRequestTraceLookup()}
+                    disabled={requestTraceLoading}
+                    className="rounded-md border border-accent-500/30 bg-accent-500/10 px-3 py-1 text-xs font-medium text-accent-300 hover:bg-accent-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Lookup
+                  </button>
+                </div>
+                {requestTraceError && (
+                  <div className="mt-3 rounded-md border border-red-500/20 bg-red-900/20 px-2 py-1 text-xs text-red-300">
+                    <div>{requestTraceError}</div>
+                    {requestTraceErrorRequestID && (
+                      <div className="mt-1 flex items-center gap-2 text-[11px] text-red-200">
+                        <span>request_id: {requestTraceErrorRequestID}</span>
+                        <button
+                          onClick={() => void copyTextToClipboard(requestTraceErrorRequestID)}
+                          className="rounded border border-red-400/30 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-red-100 hover:border-red-300/60 hover:text-red-50 transition-colors"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {requestTraceResult && (
+                  <div className="mt-3 rounded-md bg-black/20 p-2 text-xs">
+                    <div className="mb-2 font-mono text-gray-300">
+                      request_id: <span className="text-gray-100">{requestTraceResult.request_id}</span>
+                    </div>
+                    <div className="mb-2 text-gray-400">events: {requestTraceResult.count}</div>
+                    {requestTraceResult.events.length === 0 && (
+                      <p className="text-[11px] text-gray-500">No correlated events found for this request id.</p>
+                    )}
+                    <div className="space-y-2">
+                      {requestTraceResult.events.slice(0, 6).map((event) => (
+                        <div key={event.event_id || `${event.created_at}-${event.title}`} className="rounded border border-gray-800 px-2 py-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="font-mono text-[11px] text-gray-200">{event.event_type || 'unknown'}</p>
+                              <p className="text-gray-300">{event.title || 'Untitled event'}</p>
+                              <p className="text-[11px] text-gray-500">{event.created_at || 'timestamp unavailable'}</p>
+                            </div>
+                            {event.incident_id && (
+                              <button
+                                onClick={() => {
+                                  setSelectedIncidentID(event.incident_id);
+                                  if (router.isReady && router.query.incident !== event.incident_id) {
+                                    void router.replace(
+                                      { pathname: router.pathname, query: { ...router.query, incident: event.incident_id } },
+                                      undefined,
+                                      { shallow: true }
+                                    );
+                                  }
+                                }}
+                                className="rounded border border-gray-700 px-2 py-0.5 text-[10px] text-gray-300 hover:border-accent-500/50 hover:text-accent-300"
+                              >
+                                Open Incident
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {requestTraceResult.events.length > 6 && (
+                      <p className="mt-2 text-[11px] text-gray-500">
+                        showing first 6 events from this request trace.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
               <TimelinePanel
                 events={timeline || []}

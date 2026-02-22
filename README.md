@@ -218,6 +218,12 @@ Release smoke gate:
 ./scripts/smoke_local.sh
 ```
 
+MVP Phase-1 exit gate artifact:
+
+```bash
+./scripts/mvp_phase1_exit_gate.sh
+```
+
 Release checkpoint (`./scripts/release_checkpoint.sh`) runs `verify_local.sh --strict`.
 If `FLOWFORGE_CLOUD_DEPS_REQUIRED=1`, it also enforces `/readyz` health (HTTP 200 + `status=ready` + `cloud_dependencies_required=true`).
 If `FLOWFORGE_REQUIRE_CONTROLPLANE_REPLAY_DRILL=1`, it enforces a passing `controlplane_replay_drill.sh` run against the live API.

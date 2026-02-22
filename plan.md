@@ -4982,6 +4982,7 @@ Build FlowForge into the trusted deterministic execution-control infrastructure 
 - [x] API error contract standardized to RFC7807 across runtime/integration handlers (Problem Details + dashboard parsing + contract assertions)
 - [x] request correlation hardened end-to-end (`X-Request-Id` propagation + typed problem URIs + audit reason tagging for control-plane actions)
 - [x] request traceability made first-class in persistence + ops UX (`request_id` stored on audit/unified events, `/v1/ops/requests/{request_id}` endpoint, dashboard copyable request id on mutation errors)
+- [x] MVP Phase-1 exit gate operationalized (`scripts/mvp_phase1_exit_gate.sh` + release checkpoint optional strict gate + contract coverage + dashboard request-trace lookup UX)
 
 Definition of done for the external validation checkbox:
 1. run `scripts/onboarding_usability_test.sh --mode external` with a non-contributor tester.

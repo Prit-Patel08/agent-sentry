@@ -16,6 +16,7 @@ Use this file as the single command reference for day-to-day operation.
 |---|---|
 | Full local verifier | `./scripts/verify_local.sh` |
 | Strict local verifier | `./scripts/verify_local.sh --strict` |
+| MVP Phase-1 exit gate artifact | `./scripts/mvp_phase1_exit_gate.sh` |
 | Pre-commit gate | `make precommit` |
 | Contract test suite | `make contracts` |
 

@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help go-tools doctor doctor-summary doctor-strict contracts precommit hook hook-strict cloud-ready ops-snapshot evidence-bundle evidence-verify
+.PHONY: help go-tools doctor doctor-summary doctor-strict contracts precommit hook hook-strict cloud-ready ops-snapshot mvp-exit evidence-bundle evidence-verify
 
 help:
 	@echo "FlowForge developer shortcuts:"
@@ -14,6 +14,7 @@ help:
 	@echo "  make hook-strict    - install strict managed pre-commit hook"
 	@echo "  make cloud-ready    - run cloud dependency + readyz smoke checks"
 	@echo "  make ops-snapshot   - generate ops status snapshot artifacts"
+	@echo "  make mvp-exit       - run MVP Phase-1 exit gate artifact"
 	@echo "  make evidence-bundle - export signed evidence bundle (requires signing key env)"
 	@echo "  make evidence-verify BUNDLE_DIR=<path> - verify signed evidence bundle"
 
@@ -52,6 +53,9 @@ cloud-ready:
 
 ops-snapshot:
 	./scripts/ops_status_snapshot.sh
+
+mvp-exit:
+	./scripts/mvp_phase1_exit_gate.sh
 
 evidence-bundle:
 	go run . evidence export

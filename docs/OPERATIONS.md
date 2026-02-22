@@ -49,6 +49,12 @@ Run benchmark suite:
 go test ./test -bench . -benchmem -run '^$'
 ```
 
+Run MVP Phase-1 exit gate artifact (kill/restart correctness + deterministic evidence chain + request-trace correlation):
+
+```bash
+./scripts/mvp_phase1_exit_gate.sh
+```
+
 Run race detector:
 
 ```bash

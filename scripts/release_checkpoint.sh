@@ -75,6 +75,8 @@ controlplane_replay_retention_dir=""
 weekly_slo_green_gate_status="SKIPPED (FLOWFORGE_REQUIRE_WEEKLY_SLO_GREEN not enabled)"
 weekly_slo_review_dir=""
 weekly_slo_error_budget_status="N/A"
+mvp_phase1_exit_gate_status="SKIPPED (FLOWFORGE_REQUIRE_MVP_PHASE1_EXIT_GATE not enabled)"
+mvp_phase1_exit_gate_dir=""
 
 if is_truthy "${FLOWFORGE_CLOUD_DEPS_REQUIRED:-0}"; then
   readyz_artifact="$REPORT_DIR/readyz.json"
@@ -248,6 +250,37 @@ if is_truthy "${FLOWFORGE_REQUIRE_WEEKLY_SLO_GREEN:-0}"; then
   weekly_slo_green_gate_status="PASS"
 fi
 
+if is_truthy "${FLOWFORGE_REQUIRE_MVP_PHASE1_EXIT_GATE:-0}"; then
+  if [[ ! -x "./scripts/mvp_phase1_exit_gate.sh" ]]; then
+    echo "Blocked: MVP Phase-1 exit gate script missing or not executable (scripts/mvp_phase1_exit_gate.sh)." >&2
+    exit 1
+  fi
+
+  mvp_phase1_exit_gate_dir="$REPORT_DIR/mvp-phase1-exit-gate"
+  mvp_gate_cmd=(
+    ./scripts/mvp_phase1_exit_gate.sh
+    --out "$mvp_phase1_exit_gate_dir"
+  )
+  if [[ -n "${FLOWFORGE_MVP_EXIT_GO_TEST_TIMEOUT:-}" ]]; then
+    mvp_gate_cmd+=(--go-test-timeout "${FLOWFORGE_MVP_EXIT_GO_TEST_TIMEOUT}")
+  fi
+  if is_truthy "${FLOWFORGE_MVP_EXIT_SKIP_DASHBOARD_BUILD:-0}"; then
+    mvp_gate_cmd+=(--skip-dashboard-build)
+  fi
+  if ! "${mvp_gate_cmd[@]}" >/dev/null; then
+    echo "Blocked: MVP Phase-1 exit gate failed while evaluating release readiness." >&2
+    exit 1
+  fi
+
+  mvp_summary="$mvp_phase1_exit_gate_dir/summary.tsv"
+  if [[ ! -f "$mvp_summary" ]] || ! grep -q $'^overall_status\tPASS$' "$mvp_summary"; then
+    echo "Blocked: MVP Phase-1 exit gate did not report PASS summary status." >&2
+    exit 1
+  fi
+
+  mvp_phase1_exit_gate_status="PASS"
+fi
+
 cat > "$REPORT_FILE" <<EOF
 # Release Checkpoint
 
@@ -264,6 +297,7 @@ Date: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 - Control-plane replay drill gate: $controlplane_replay_drill_status
 - Control-plane replay retention prune: $controlplane_replay_retention_status
 - Weekly SLO GREEN gate: $weekly_slo_green_gate_status
+- MVP Phase-1 exit gate: $mvp_phase1_exit_gate_status
 
 ## Readiness Evidence
 
@@ -274,6 +308,7 @@ Date: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 - Control-plane replay retention artifact: ${controlplane_replay_retention_dir:-N/A}
 - Weekly SLO artifact: ${weekly_slo_review_dir:-N/A}
 - Weekly SLO error budget status: ${weekly_slo_error_budget_status:-N/A}
+- MVP Phase-1 exit gate artifact: ${mvp_phase1_exit_gate_dir:-N/A}
 
 ## Ready
 

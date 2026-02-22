@@ -132,6 +132,42 @@ EOF
   chmod +x "$tmp_dir/scripts/slo_weekly_review.sh"
 }
 
+write_stub_mvp_phase1_exit_gate() {
+  cat > "$tmp_dir/scripts/mvp_phase1_exit_gate.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+out_dir=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --out)
+      out_dir="${2:-}"
+      shift 2
+      ;;
+    --go-test-timeout)
+      shift 2
+      ;;
+    --skip-dashboard-build)
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+if [[ -z "$out_dir" ]]; then
+  echo "missing --out" >&2
+  exit 1
+fi
+mkdir -p "$out_dir"
+status="${FLOWFORGE_TEST_MVP_PHASE1_STATUS:-PASS}"
+cat > "$out_dir/summary.tsv" <<TSV
+overall_status	${status}
+TSV
+echo "stub MVP phase1 gate ${status}"
+EOF
+  chmod +x "$tmp_dir/scripts/mvp_phase1_exit_gate.sh"
+}
+
 write_required_docs() {
   for doc in RUNBOOK.md WEEK1_PILOT.md RELEASE_CHECKLIST.md ROLLBACK_CHECKLIST.md; do
     echo "# ${doc}" > "$tmp_dir/docs/$doc"
@@ -170,6 +206,46 @@ run_case_replay_required_missing_key_fails() {
     exit 1
   fi
   rg -q "replay drill gate requires FLOWFORGE_API_KEY" "$tmp_dir/case_replay_missing_key.stderr.log"
+}
+
+run_case_mvp_phase1_gate_missing_script_fails() {
+  set +e
+  (
+    cd "$tmp_dir"
+    FLOWFORGE_REQUIRE_MVP_PHASE1_EXIT_GATE=1 ./scripts/release_checkpoint.sh "$tmp_dir/out-case-mvp-missing-script"
+  ) >"$tmp_dir/case_mvp_missing.stdout.log" 2>"$tmp_dir/case_mvp_missing.stderr.log"
+  rc=$?
+  set -e
+  if [[ "$rc" -eq 0 ]]; then
+    echo "mvp-missing-script case expected failure but passed" >&2
+    exit 1
+  fi
+  rg -q "MVP Phase-1 exit gate script missing or not executable" "$tmp_dir/case_mvp_missing.stderr.log"
+}
+
+run_case_mvp_phase1_gate_passes() {
+  (
+    cd "$tmp_dir"
+    FLOWFORGE_REQUIRE_MVP_PHASE1_EXIT_GATE=1 ./scripts/release_checkpoint.sh "$tmp_dir/out-case-mvp-pass" >/dev/null
+  )
+  rg -q "MVP Phase-1 exit gate: PASS" "$tmp_dir/out-case-mvp-pass/checkpoint.md"
+  test -f "$tmp_dir/out-case-mvp-pass/mvp-phase1-exit-gate/summary.tsv"
+}
+
+run_case_mvp_phase1_gate_summary_fail_fails() {
+  set +e
+  (
+    cd "$tmp_dir"
+    FLOWFORGE_REQUIRE_MVP_PHASE1_EXIT_GATE=1 FLOWFORGE_TEST_MVP_PHASE1_STATUS=FAIL \
+      ./scripts/release_checkpoint.sh "$tmp_dir/out-case-mvp-summary-fail"
+  ) >"$tmp_dir/case_mvp_summary_fail.stdout.log" 2>"$tmp_dir/case_mvp_summary_fail.stderr.log"
+  rc=$?
+  set -e
+  if [[ "$rc" -eq 0 ]]; then
+    echo "mvp-summary-fail case expected failure but passed" >&2
+    exit 1
+  fi
+  rg -q "MVP Phase-1 exit gate did not report PASS summary status" "$tmp_dir/case_mvp_summary_fail.stderr.log"
 }
 
 run_case_replay_required_passes() {
@@ -356,6 +432,10 @@ init_temp_git_repo
 
 run_case_no_cloud_required
 run_case_replay_required_missing_key_fails
+run_case_mvp_phase1_gate_missing_script_fails
+write_stub_mvp_phase1_exit_gate
+run_case_mvp_phase1_gate_passes
+run_case_mvp_phase1_gate_summary_fail_fails
 run_case_replay_required_passes
 run_case_replay_retention_enabled_passes
 run_case_weekly_slo_green_gate_passes
