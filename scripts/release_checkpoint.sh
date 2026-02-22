@@ -68,6 +68,8 @@ readyz_artifact=""
 readyz_url="${FLOWFORGE_API_BASE:-http://127.0.0.1:8080}/readyz"
 evidence_bundle_status="SKIPPED (FLOWFORGE_REQUIRE_EVIDENCE_BUNDLE not enabled)"
 evidence_bundle_dir=""
+controlplane_replay_drill_status="SKIPPED (FLOWFORGE_REQUIRE_CONTROLPLANE_REPLAY_DRILL not enabled)"
+controlplane_replay_drill_dir=""
 
 if is_truthy "${FLOWFORGE_CLOUD_DEPS_REQUIRED:-0}"; then
   readyz_artifact="$REPORT_DIR/readyz.json"
@@ -122,6 +124,31 @@ if is_truthy "${FLOWFORGE_REQUIRE_EVIDENCE_BUNDLE:-0}"; then
   evidence_bundle_status="PASS"
 fi
 
+if is_truthy "${FLOWFORGE_REQUIRE_CONTROLPLANE_REPLAY_DRILL:-0}"; then
+  if [[ -z "${FLOWFORGE_API_KEY:-}" ]]; then
+    echo "Blocked: replay drill gate requires FLOWFORGE_API_KEY." >&2
+    exit 1
+  fi
+  if [[ ! -x "./scripts/controlplane_replay_drill.sh" ]]; then
+    echo "Blocked: replay drill script missing or not executable (scripts/controlplane_replay_drill.sh)." >&2
+    exit 1
+  fi
+
+  controlplane_replay_drill_dir="$REPORT_DIR/controlplane-replay-drill"
+  ./scripts/controlplane_replay_drill.sh \
+    --api-base "${FLOWFORGE_API_BASE:-http://127.0.0.1:8080}" \
+    --api-key "${FLOWFORGE_API_KEY}" \
+    --out "$controlplane_replay_drill_dir" >/dev/null
+
+  summary_tsv="$controlplane_replay_drill_dir/summary.tsv"
+  if [[ ! -f "$summary_tsv" ]] || ! grep -q $'^overall_status\tPASS$' "$summary_tsv"; then
+    echo "Blocked: replay drill did not produce PASS summary." >&2
+    exit 1
+  fi
+
+  controlplane_replay_drill_status="PASS"
+fi
+
 cat > "$REPORT_FILE" <<EOF
 # Release Checkpoint
 
@@ -135,12 +162,14 @@ Date: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 - Operator docs present (runbook/pilot/release/rollback): PASS
 - Cloud dependency readiness gate: $cloud_readiness_status
 - Signed evidence bundle gate: $evidence_bundle_status
+- Control-plane replay drill gate: $controlplane_replay_drill_status
 
 ## Readiness Evidence
 
 - Ready endpoint: $readyz_url
 - Ready payload artifact: ${readyz_artifact:-N/A}
 - Evidence bundle artifact: ${evidence_bundle_dir:-N/A}
+- Control-plane replay drill artifact: ${controlplane_replay_drill_dir:-N/A}
 
 ## Ready
 

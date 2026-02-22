@@ -169,6 +169,62 @@ func CountControlPlaneReplayRows() (int, error) {
 	return count, nil
 }
 
+// PurgeControlPlaneReplays deletes stale replay rows.
+//
+// retentionDays:
+//
+//	> 0 => delete rows where last_seen_at is older than retentionDays
+//	<= 0 => skip age-based deletion
+//
+// maxRows:
+//
+//	> 0 => keep only newest maxRows by (last_seen_at DESC, id DESC)
+//	<= 0 => skip count-based trimming
+func PurgeControlPlaneReplays(retentionDays, maxRows int) (int, error) {
+	if db == nil {
+		return 0, fmt.Errorf("db not initialized")
+	}
+	if retentionDays <= 0 && maxRows <= 0 {
+		return 0, nil
+	}
+
+	deletedTotal := 0
+
+	if retentionDays > 0 {
+		window := fmt.Sprintf("-%d day", retentionDays)
+		res, err := db.Exec(`
+DELETE FROM control_plane_replays
+WHERE last_seen_at < datetime('now', ?)
+`, window)
+		if err != nil {
+			return deletedTotal, err
+		}
+		if n, err := res.RowsAffected(); err == nil {
+			deletedTotal += int(n)
+		}
+	}
+
+	if maxRows > 0 {
+		res, err := db.Exec(`
+DELETE FROM control_plane_replays
+WHERE id IN (
+  SELECT id
+  FROM control_plane_replays
+  ORDER BY last_seen_at DESC, id DESC
+  LIMIT -1 OFFSET ?
+)
+`, maxRows)
+		if err != nil {
+			return deletedTotal, err
+		}
+		if n, err := res.RowsAffected(); err == nil {
+			deletedTotal += int(n)
+		}
+	}
+
+	return deletedTotal, nil
+}
+
 func IsNotFound(err error) bool {
 	return err == sql.ErrNoRows
 }

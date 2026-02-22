@@ -103,6 +103,7 @@ Run reliability drills:
 ```bash
 ./scripts/recovery_drill.sh
 ./scripts/controlplane_replay_drill.sh
+./scripts/controlplane_replay_retention.sh --retention-days 30 --max-rows 50000
 ```
 
 The drill must confirm:

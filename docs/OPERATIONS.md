@@ -110,6 +110,7 @@ Notes:
 ./scripts/tune_detection.sh
 ./scripts/recovery_drill.sh
 ./scripts/controlplane_replay_drill.sh
+./scripts/controlplane_replay_retention.sh
 ./scripts/release_checkpoint.sh
 ```
 
@@ -131,6 +132,12 @@ Run control-plane idempotency replay drill evidence:
 ./scripts/controlplane_replay_drill.sh
 ```
 
+Prune persisted replay ledger rows (retention + cap):
+
+```bash
+./scripts/controlplane_replay_retention.sh --retention-days 30 --max-rows 50000
+```
+
 Artifact output:
 - `pilot_artifacts/slo-weekly-<timestamp>/slo_weekly_report.md`
 - `pilot_artifacts/slo-weekly-<timestamp>/summary.tsv`
@@ -146,6 +153,12 @@ Canonical process and policy:
 Before tagging, complete:
 - release checklist
 - release checkpoint (`./scripts/release_checkpoint.sh`)
+
+Optional strict replay gate during release checkpoint:
+
+```bash
+FLOWFORGE_REQUIRE_CONTROLPLANE_REPLAY_DRILL=1 ./scripts/release_checkpoint.sh
+```
 
 ## Issue Intake and Postmortem Templates
 

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -74,5 +75,86 @@ func TestControlPlaneReplayInsertDoesNotOverwriteFirstResponse(t *testing.T) {
 	}
 	if rec.ResponseBody != `{"status":"stop_requested"}` {
 		t.Fatalf("expected original response_body preserved, got %q", rec.ResponseBody)
+	}
+}
+
+func TestPurgeControlPlaneReplaysByRetentionDays(t *testing.T) {
+	_ = withTempDBPath(t)
+	CloseDB()
+	if err := InitDB(); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		key := fmt.Sprintf("retention-key-%d", i)
+		if err := InsertControlPlaneReplay(key, "POST /process/kill", fmt.Sprintf("hash-%d", i), 202, `{"status":"stop_requested"}`); err != nil {
+			t.Fatalf("insert replay row %d: %v", i, err)
+		}
+	}
+
+	if _, err := db.Exec(`
+UPDATE control_plane_replays
+SET last_seen_at = datetime('now', '-10 day')
+WHERE idempotency_key = 'retention-key-0'
+`); err != nil {
+		t.Fatalf("age row for retention test: %v", err)
+	}
+
+	deleted, err := PurgeControlPlaneReplays(7, 0)
+	if err != nil {
+		t.Fatalf("PurgeControlPlaneReplays(retention): %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("expected exactly 1 row deleted by retention, got %d", deleted)
+	}
+
+	count, err := CountControlPlaneReplayRows()
+	if err != nil {
+		t.Fatalf("CountControlPlaneReplayRows: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 remaining rows after retention purge, got %d", count)
+	}
+}
+
+func TestPurgeControlPlaneReplaysByMaxRows(t *testing.T) {
+	_ = withTempDBPath(t)
+	CloseDB()
+	if err := InitDB(); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+
+	for i := 0; i < 5; i++ {
+		key := fmt.Sprintf("maxrows-key-%d", i)
+		if err := InsertControlPlaneReplay(key, "POST /process/restart", fmt.Sprintf("hash-%d", i), 202, `{"status":"restart_requested"}`); err != nil {
+			t.Fatalf("insert replay row %d: %v", i, err)
+		}
+	}
+
+	deleted, err := PurgeControlPlaneReplays(0, 2)
+	if err != nil {
+		t.Fatalf("PurgeControlPlaneReplays(maxRows): %v", err)
+	}
+	if deleted != 3 {
+		t.Fatalf("expected 3 rows deleted by maxRows trim, got %d", deleted)
+	}
+
+	count, err := CountControlPlaneReplayRows()
+	if err != nil {
+		t.Fatalf("CountControlPlaneReplayRows: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 remaining rows after maxRows purge, got %d", count)
+	}
+
+	rows, err := ListControlPlaneReplays(10)
+	if err != nil {
+		t.Fatalf("ListControlPlaneReplays: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected list length 2 after maxRows purge, got %d", len(rows))
+	}
+	if rows[0].IdempotencyKey != "maxrows-key-4" || rows[1].IdempotencyKey != "maxrows-key-3" {
+		t.Fatalf("expected newest keys preserved (4,3), got (%s,%s)", rows[0].IdempotencyKey, rows[1].IdempotencyKey)
 	}
 }
