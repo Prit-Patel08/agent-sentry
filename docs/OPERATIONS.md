@@ -85,6 +85,7 @@ make evidence-bundle
 - `scripts/tooling_doctor_contract_test.sh`
 - `scripts/release_checkpoint_contract_test.sh`
 - `scripts/controlplane_replay_retention_contract_test.sh`
+- `scripts/slo_weekly_review_contract_test.sh`
 - `scripts/install_git_hook_contract_test.sh`
 
 Cloud readiness smoke:
@@ -128,6 +129,15 @@ Generate the weekly SLO report and error-budget decision artifact:
 ./scripts/slo_weekly_review.sh --days 7
 ```
 
+Optional spike threshold tuning:
+
+```bash
+./scripts/slo_weekly_review.sh \
+  --days 7 \
+  --replay-spike-yellow 5 --replay-spike-red 10 \
+  --conflict-spike-yellow 2 --conflict-spike-red 5
+```
+
 Run control-plane idempotency replay drill evidence:
 
 ```bash
@@ -143,6 +153,8 @@ Prune persisted replay ledger rows (retention + cap):
 Artifact output:
 - `pilot_artifacts/slo-weekly-<timestamp>/slo_weekly_report.md`
 - `pilot_artifacts/slo-weekly-<timestamp>/summary.tsv`
+- `pilot_artifacts/slo-weekly-<timestamp>/replay_daily_trend.tsv`
+- `pilot_artifacts/slo-weekly-<timestamp>/replay_history.json`
 
 Canonical process and policy:
 - `docs/SLO_OPERATIONS.md`

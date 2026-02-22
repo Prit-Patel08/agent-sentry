@@ -87,6 +87,9 @@ jobs:
       - name: Run replay retention contract tests
         run: ./scripts/controlplane_replay_retention_contract_test.sh
 
+      - name: Run SLO weekly review contract tests
+        run: ./scripts/slo_weekly_review_contract_test.sh
+
       - name: Run git hook installer contract tests
         run: ./scripts/install_git_hook_contract_test.sh
 

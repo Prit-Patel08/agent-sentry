@@ -11,6 +11,12 @@ DB_PATH="${FLOWFORGE_DB_PATH:-flowforge.db}"
 OUT_DIR=""
 FAIL_ON_BREACH=0
 REPLAY_MAX_ROWS=50000
+REPLAY_SPIKE_YELLOW=5
+REPLAY_SPIKE_RED=10
+CONFLICT_SPIKE_YELLOW=2
+CONFLICT_SPIKE_RED=5
+SPIKE_FACTOR_YELLOW="2.00"
+SPIKE_FACTOR_RED="3.00"
 
 usage() {
   cat <<EOF
@@ -22,6 +28,14 @@ Options:
   --db PATH            SQLite DB path (default: FLOWFORGE_DB_PATH or flowforge.db).
   --out DIR            Output directory (default: pilot_artifacts/slo-weekly-<timestamp>).
   --replay-max-rows N  Replay ledger row-cap target for SLO (default: 50000, <=0 disables check).
+  --replay-spike-yellow N
+                      Yellow threshold for daily replay events (default: 5).
+  --replay-spike-red N
+                      Red threshold for daily replay events (default: 10).
+  --conflict-spike-yellow N
+                      Yellow threshold for daily conflict events (default: 2).
+  --conflict-spike-red N
+                      Red threshold for daily conflict events (default: 5).
   --fail-on-breach     Exit non-zero if error budget status is RED.
   -h, --help           Show help text.
 EOF
@@ -49,6 +63,22 @@ while [[ $# -gt 0 ]]; do
       REPLAY_MAX_ROWS="${2:-}"
       shift 2
       ;;
+    --replay-spike-yellow)
+      REPLAY_SPIKE_YELLOW="${2:-}"
+      shift 2
+      ;;
+    --replay-spike-red)
+      REPLAY_SPIKE_RED="${2:-}"
+      shift 2
+      ;;
+    --conflict-spike-yellow)
+      CONFLICT_SPIKE_YELLOW="${2:-}"
+      shift 2
+      ;;
+    --conflict-spike-red)
+      CONFLICT_SPIKE_RED="${2:-}"
+      shift 2
+      ;;
     --fail-on-breach)
       FAIL_ON_BREACH=1
       shift
@@ -71,6 +101,24 @@ if [[ ! "$DAYS" =~ ^[0-9]+$ ]] || [[ "$DAYS" -le 0 ]]; then
 fi
 if [[ ! "$REPLAY_MAX_ROWS" =~ ^-?[0-9]+$ ]]; then
   echo "--replay-max-rows must be an integer (got: $REPLAY_MAX_ROWS)" >&2
+  exit 1
+fi
+for numeric in "$REPLAY_SPIKE_YELLOW" "$REPLAY_SPIKE_RED" "$CONFLICT_SPIKE_YELLOW" "$CONFLICT_SPIKE_RED"; do
+  if [[ ! "$numeric" =~ ^[0-9]+$ ]]; then
+    echo "Replay spike thresholds must be non-negative integers." >&2
+    exit 1
+  fi
+done
+if [[ "$REPLAY_SPIKE_YELLOW" -le 0 ]] || [[ "$REPLAY_SPIKE_RED" -le 0 ]] || [[ "$CONFLICT_SPIKE_YELLOW" -le 0 ]] || [[ "$CONFLICT_SPIKE_RED" -le 0 ]]; then
+  echo "Replay spike thresholds must be positive integers." >&2
+  exit 1
+fi
+if [[ "$REPLAY_SPIKE_YELLOW" -gt "$REPLAY_SPIKE_RED" ]]; then
+  echo "--replay-spike-yellow must be <= --replay-spike-red." >&2
+  exit 1
+fi
+if [[ "$CONFLICT_SPIKE_YELLOW" -gt "$CONFLICT_SPIKE_RED" ]]; then
+  echo "--conflict-spike-yellow must be <= --conflict-spike-red." >&2
   exit 1
 fi
 REPLAY_MAX_ROWS_TARGET_LABEL="$REPLAY_MAX_ROWS"
@@ -115,6 +163,31 @@ num_le() {
   awk -v a="$left" -v b="$right" 'BEGIN { exit !(a <= b) }'
 }
 
+num_ge() {
+  local left="$1"
+  local right="$2"
+  awk -v a="$left" -v b="$right" 'BEGIN { exit !(a >= b) }'
+}
+
+promote_replay_spike_status() {
+  local trigger="$1"
+  local reason="$2"
+  replay_spike_reasons+=("$reason")
+
+  if [[ "$trigger" == "RED" ]]; then
+    slo_c_replay_spike_status="FAIL"
+    replay_spike_budget_trigger="RED"
+    return
+  fi
+
+  if [[ "$replay_spike_budget_trigger" != "RED" ]]; then
+    replay_spike_budget_trigger="YELLOW"
+  fi
+  if [[ "$slo_c_replay_spike_status" == "PASS" ]]; then
+    slo_c_replay_spike_status="WARN"
+  fi
+}
+
 probe_failures=0
 
 probe() {
@@ -137,6 +210,7 @@ probe "/healthz" "$OUT_DIR/healthz.json" || true
 probe "/readyz" "$OUT_DIR/readyz.json" || true
 probe "/metrics" "$OUT_DIR/metrics.prom" || true
 probe "/timeline" "$OUT_DIR/timeline.json" || true
+probe "/v1/ops/controlplane/replay/history?days=${DAYS}" "$OUT_DIR/replay_history.json" || true
 
 TOTAL_EVENTS="$(sql_scalar "SELECT COUNT(*) FROM events WHERE ${EVENT_TIME_COL} >= datetime('now', '${WINDOW}');")"
 INCIDENT_EVENTS="$(sql_scalar "SELECT COUNT(*) FROM events WHERE ${EVENT_TIME_COL} >= datetime('now', '${WINDOW}') AND event_type='incident';")"
@@ -166,6 +240,77 @@ WHERE ${EVENT_TIME_COL} >= datetime('now', '${WINDOW}')
   AND event_type='audit'
   AND UPPER(title)='IDEMPOTENT_CONFLICT';
 ")"
+
+REPLAY_TREND_TSV="$OUT_DIR/replay_daily_trend.tsv"
+{
+  printf 'day\treplay_events\tconflict_events\n'
+  sqlite3 -batch -noheader -separator $'\t' "$DB_PATH" "
+WITH RECURSIVE seq(n) AS (
+  SELECT 0
+  UNION ALL
+  SELECT n + 1
+  FROM seq
+  WHERE n + 1 < ${DAYS}
+),
+daily AS (
+  SELECT
+    date(COALESCE(${EVENT_TIME_COL}, timestamp, CURRENT_TIMESTAMP)) AS day,
+    SUM(CASE WHEN event_type='audit' AND UPPER(title)='IDEMPOTENT_REPLAY' THEN 1 ELSE 0 END) AS replay_events,
+    SUM(CASE WHEN event_type='audit' AND UPPER(title)='IDEMPOTENT_CONFLICT' THEN 1 ELSE 0 END) AS conflict_events
+  FROM events
+  WHERE date(COALESCE(${EVENT_TIME_COL}, timestamp, CURRENT_TIMESTAMP)) >= date('now', '-$((DAYS - 1)) day')
+  GROUP BY day
+),
+series AS (
+  SELECT date('now', printf('-%d day', ${DAYS} - 1 - n)) AS day
+  FROM seq
+)
+SELECT
+  s.day,
+  COALESCE(d.replay_events, 0),
+  COALESCE(d.conflict_events, 0)
+FROM series s
+LEFT JOIN daily d USING(day)
+ORDER BY s.day ASC;
+"
+} >"$REPLAY_TREND_TSV"
+
+LATEST_REPLAY_DAY="$(awk -F '\t' 'NR > 1 { day = $1 } END { print day }' "$REPLAY_TREND_TSV")"
+LATEST_REPLAY_EVENTS="$(awk -F '\t' 'NR > 1 { value = $2 } END { print value + 0 }' "$REPLAY_TREND_TSV")"
+LATEST_CONFLICT_EVENTS="$(awk -F '\t' 'NR > 1 { value = $3 } END { print value + 0 }' "$REPLAY_TREND_TSV")"
+PREV_REPLAY_PEAK="$(awk -F '\t' '
+NR > 1 { count += 1; replay[count] = $2 + 0 }
+END {
+  peak = 0
+  for (i = 1; i < count; i++) {
+    if (replay[i] > peak) {
+      peak = replay[i]
+    }
+  }
+  print peak + 0
+}
+' "$REPLAY_TREND_TSV")"
+PREV_CONFLICT_PEAK="$(awk -F '\t' '
+NR > 1 { count += 1; conflict[count] = $3 + 0 }
+END {
+  peak = 0
+  for (i = 1; i < count; i++) {
+    if (conflict[i] > peak) {
+      peak = conflict[i]
+    }
+  }
+  print peak + 0
+}
+' "$REPLAY_TREND_TSV")"
+
+REPLAY_RATIO_TO_PREV_PEAK="N/A"
+if [[ "$PREV_REPLAY_PEAK" -gt 0 ]]; then
+  REPLAY_RATIO_TO_PREV_PEAK="$(awk -v latest="$LATEST_REPLAY_EVENTS" -v prev="$PREV_REPLAY_PEAK" 'BEGIN { printf "%.2f", latest / prev }')"
+fi
+CONFLICT_RATIO_TO_PREV_PEAK="N/A"
+if [[ "$PREV_CONFLICT_PEAK" -gt 0 ]]; then
+  CONFLICT_RATIO_TO_PREV_PEAK="$(awk -v latest="$LATEST_CONFLICT_EVENTS" -v prev="$PREV_CONFLICT_PEAK" 'BEGIN { printf "%.2f", latest / prev }')"
+fi
 
 DESTRUCTIVE_ACTIONS="$(sql_scalar "
 SELECT COUNT(*) FROM events
@@ -364,6 +509,9 @@ slo_c_api_status="FAIL"
 slo_c_freshness_status="NO_DATA"
 slo_c_idempotency_status="PASS"
 slo_c_replay_capacity_status="NO_DATA"
+slo_c_replay_spike_status="PASS"
+replay_spike_budget_trigger="NONE"
+replay_spike_reasons=()
 
 if [[ "$LATENCY_SAMPLE_COUNT" -gt 0 ]]; then
   if num_le "$LATENCY_P95" "15"; then
@@ -409,7 +557,61 @@ if [[ "$REPLAY_MAX_ROWS" -gt 0 ]]; then
   fi
 fi
 
+if [[ "$LATEST_REPLAY_EVENTS" -ge "$REPLAY_SPIKE_RED" ]]; then
+  promote_replay_spike_status \
+    "RED" \
+    "replay daily count ${LATEST_REPLAY_EVENTS} reached red threshold ${REPLAY_SPIKE_RED}"
+elif [[ "$LATEST_REPLAY_EVENTS" -ge "$REPLAY_SPIKE_YELLOW" ]]; then
+  promote_replay_spike_status \
+    "YELLOW" \
+    "replay daily count ${LATEST_REPLAY_EVENTS} reached yellow threshold ${REPLAY_SPIKE_YELLOW}"
+fi
+
+if [[ "$LATEST_CONFLICT_EVENTS" -ge "$CONFLICT_SPIKE_RED" ]]; then
+  promote_replay_spike_status \
+    "RED" \
+    "conflict daily count ${LATEST_CONFLICT_EVENTS} reached red threshold ${CONFLICT_SPIKE_RED}"
+elif [[ "$LATEST_CONFLICT_EVENTS" -ge "$CONFLICT_SPIKE_YELLOW" ]]; then
+  promote_replay_spike_status \
+    "YELLOW" \
+    "conflict daily count ${LATEST_CONFLICT_EVENTS} reached yellow threshold ${CONFLICT_SPIKE_YELLOW}"
+fi
+
+if [[ "$PREV_REPLAY_PEAK" -gt 0 ]]; then
+  replay_rel_yellow="$(awk -v peak="$PREV_REPLAY_PEAK" -v factor="$SPIKE_FACTOR_YELLOW" 'BEGIN { printf "%.4f", peak * factor }')"
+  replay_rel_red="$(awk -v peak="$PREV_REPLAY_PEAK" -v factor="$SPIKE_FACTOR_RED" 'BEGIN { printf "%.4f", peak * factor }')"
+  if num_ge "$LATEST_REPLAY_EVENTS" "$replay_rel_red"; then
+    promote_replay_spike_status \
+      "RED" \
+      "replay daily count ${LATEST_REPLAY_EVENTS} is >= ${SPIKE_FACTOR_RED}x previous peak ${PREV_REPLAY_PEAK}"
+  elif num_ge "$LATEST_REPLAY_EVENTS" "$replay_rel_yellow"; then
+    promote_replay_spike_status \
+      "YELLOW" \
+      "replay daily count ${LATEST_REPLAY_EVENTS} is >= ${SPIKE_FACTOR_YELLOW}x previous peak ${PREV_REPLAY_PEAK}"
+  fi
+fi
+
+if [[ "$PREV_CONFLICT_PEAK" -gt 0 ]]; then
+  conflict_rel_yellow="$(awk -v peak="$PREV_CONFLICT_PEAK" -v factor="$SPIKE_FACTOR_YELLOW" 'BEGIN { printf "%.4f", peak * factor }')"
+  conflict_rel_red="$(awk -v peak="$PREV_CONFLICT_PEAK" -v factor="$SPIKE_FACTOR_RED" 'BEGIN { printf "%.4f", peak * factor }')"
+  if num_ge "$LATEST_CONFLICT_EVENTS" "$conflict_rel_red"; then
+    promote_replay_spike_status \
+      "RED" \
+      "conflict daily count ${LATEST_CONFLICT_EVENTS} is >= ${SPIKE_FACTOR_RED}x previous peak ${PREV_CONFLICT_PEAK}"
+  elif num_ge "$LATEST_CONFLICT_EVENTS" "$conflict_rel_yellow"; then
+    promote_replay_spike_status \
+      "YELLOW" \
+      "conflict daily count ${LATEST_CONFLICT_EVENTS} is >= ${SPIKE_FACTOR_YELLOW}x previous peak ${PREV_CONFLICT_PEAK}"
+  fi
+fi
+
+REPLAY_SPIKE_REASON="no replay/conflict spike detected"
+if (( ${#replay_spike_reasons[@]} > 0 )); then
+  REPLAY_SPIKE_REASON="$(IFS='; '; echo "${replay_spike_reasons[*]}")"
+fi
+
 fail_count=0
+warn_count=0
 for st in \
   "$slo_a_latency_status" \
   "$slo_a_precision_status" \
@@ -417,17 +619,22 @@ for st in \
   "$slo_c_api_status" \
   "$slo_c_freshness_status" \
   "$slo_c_idempotency_status" \
-  "$slo_c_replay_capacity_status"; do
+  "$slo_c_replay_capacity_status" \
+  "$slo_c_replay_spike_status"; do
   if [[ "$st" == "FAIL" ]]; then
     fail_count=$((fail_count + 1))
+  elif [[ "$st" == "WARN" ]]; then
+    warn_count=$((warn_count + 1))
   fi
 done
 
 ERROR_BUDGET_STATUS="GREEN"
-if [[ "$fail_count" -eq 1 ]]; then
-  ERROR_BUDGET_STATUS="YELLOW"
+if [[ "$replay_spike_budget_trigger" == "RED" ]]; then
+  ERROR_BUDGET_STATUS="RED"
 elif [[ "$fail_count" -ge 2 ]]; then
   ERROR_BUDGET_STATUS="RED"
+elif [[ "$fail_count" -eq 1 ]] || [[ "$warn_count" -gt 0 ]] || [[ "$replay_spike_budget_trigger" == "YELLOW" ]]; then
+  ERROR_BUDGET_STATUS="YELLOW"
 fi
 
 cat >"$OUT_DIR/summary.tsv" <<EOF
@@ -436,6 +643,12 @@ window_days	${DAYS}
 db_path	${DB_PATH}
 api_base	${API_BASE}
 replay_max_rows_target	${REPLAY_MAX_ROWS}
+replay_spike_yellow_threshold	${REPLAY_SPIKE_YELLOW}
+replay_spike_red_threshold	${REPLAY_SPIKE_RED}
+conflict_spike_yellow_threshold	${CONFLICT_SPIKE_YELLOW}
+conflict_spike_red_threshold	${CONFLICT_SPIKE_RED}
+replay_spike_factor_yellow	${SPIKE_FACTOR_YELLOW}
+replay_spike_factor_red	${SPIKE_FACTOR_RED}
 total_events	${TOTAL_EVENTS}
 incident_events	${INCIDENT_EVENTS}
 decision_events	${DECISION_EVENTS}
@@ -457,14 +670,36 @@ latency_avg_seconds	${LATENCY_AVG}
 restart_storm_violations	${RESTART_STORM_VIOLATIONS}
 latest_event_age_seconds	${LATEST_EVENT_AGE_SECONDS}
 probe_failures	${probe_failures}
+latest_replay_day	${LATEST_REPLAY_DAY}
+latest_replay_events	${LATEST_REPLAY_EVENTS}
+latest_conflict_events	${LATEST_CONFLICT_EVENTS}
+previous_replay_peak	${PREV_REPLAY_PEAK}
+previous_conflict_peak	${PREV_CONFLICT_PEAK}
+replay_ratio_to_previous_peak	${REPLAY_RATIO_TO_PREV_PEAK}
+conflict_ratio_to_previous_peak	${CONFLICT_RATIO_TO_PREV_PEAK}
+replay_spike_budget_trigger	${replay_spike_budget_trigger}
+replay_spike_reason	${REPLAY_SPIKE_REASON}
 controlplane_idempotent_replay_total	${IDEMPOTENT_REPLAY_TOTAL}
 controlplane_idempotency_conflict_total	${IDEMPOTENT_CONFLICT_TOTAL}
 controlplane_replay_rows_gauge	${REPLAY_ROWS_GAUGE}
 controlplane_replay_oldest_age_seconds_gauge	${REPLAY_OLDEST_AGE_GAUGE}
 slo_c_idempotency_status	${slo_c_idempotency_status}
 slo_c_replay_capacity_status	${slo_c_replay_capacity_status}
+slo_c_replay_spike_status	${slo_c_replay_spike_status}
+warn_count	${warn_count}
+fail_count	${fail_count}
 error_budget_status	${ERROR_BUDGET_STATUS}
 EOF
+
+REPLAY_TREND_MARKDOWN_TABLE="$(awk -F '\t' '
+BEGIN {
+  print "| Day | Replays | Conflicts |"
+  print "|---|---:|---:|"
+}
+NR > 1 {
+  printf "| %s | %s | %s |\n", $1, $2, $3
+}
+' "$REPLAY_TREND_TSV")"
 
 cat >"$OUT_DIR/slo_weekly_report.md" <<EOF
 # FlowForge Weekly SLO Review
@@ -481,19 +716,36 @@ cat >"$OUT_DIR/slo_weekly_report.md" <<EOF
 | Detection->Action latency p95 | <= 15s | ${LATENCY_P95} | ${slo_a_latency_status} |
 | Low-confidence destructive actions ratio | <= 0.10 | ${LOW_CONFIDENCE_RATIO} | ${slo_a_precision_status} |
 | Restart-storm 10m bucket violations | 0 | ${RESTART_STORM_VIOLATIONS} | ${slo_b_storm_status} |
-| API probe failures (\`/healthz,/readyz,/metrics,/timeline\`) | 0 | ${probe_failures} | ${slo_c_api_status} |
+| API probe failures (\`/healthz,/readyz,/metrics,/timeline,/v1/ops/controlplane/replay/history\`) | 0 | ${probe_failures} | ${slo_c_api_status} |
 | Latest event age | <= 300s | ${LATEST_EVENT_AGE_SECONDS}s | ${slo_c_freshness_status} |
 | Idempotency conflict events | 0 | ${IDEMPOTENT_CONFLICT_EVENTS} | ${slo_c_idempotency_status} |
 | Replay ledger rows | <= ${REPLAY_MAX_ROWS_TARGET_LABEL} | ${REPLAY_ROW_COUNT} | ${slo_c_replay_capacity_status} |
+| Replay/conflict daily spike | yellow>=r${REPLAY_SPIKE_YELLOW}/c${CONFLICT_SPIKE_YELLOW}, red>=r${REPLAY_SPIKE_RED}/c${CONFLICT_SPIKE_RED} | ${LATEST_REPLAY_EVENTS}/${LATEST_CONFLICT_EVENTS} (${LATEST_REPLAY_DAY}) | ${slo_c_replay_spike_status} (${replay_spike_budget_trigger}) |
 
 ## Error Budget Decision
 
 - Current status: **${ERROR_BUDGET_STATUS}**
+- Warning checks: **${warn_count}**
+- Failing checks: **${fail_count}**
+- Replay spike trigger: **${replay_spike_budget_trigger}**
 
 Policy:
 - GREEN: continue planned roadmap work.
 - YELLOW: prioritize reliability fixes; defer non-critical expansion this week.
 - RED: feature freeze and start reliability sprint until status returns to GREEN.
+
+## Replay Trend Analysis
+
+- Latest day in window: ${LATEST_REPLAY_DAY}
+- Replay events (latest day): ${LATEST_REPLAY_EVENTS}
+- Conflict events (latest day): ${LATEST_CONFLICT_EVENTS}
+- Previous replay peak (excluding latest day): ${PREV_REPLAY_PEAK}
+- Previous conflict peak (excluding latest day): ${PREV_CONFLICT_PEAK}
+- Replay ratio vs previous peak: ${REPLAY_RATIO_TO_PREV_PEAK}
+- Conflict ratio vs previous peak: ${CONFLICT_RATIO_TO_PREV_PEAK}
+- Spike assessment: ${REPLAY_SPIKE_REASON}
+
+${REPLAY_TREND_MARKDOWN_TABLE}
 
 ## Activity Snapshot
 
@@ -517,6 +769,7 @@ Policy:
 - Control-plane conflict total (probe time): ${IDEMPOTENT_CONFLICT_TOTAL}
 - Control-plane replay rows (probe time): ${REPLAY_ROWS_GAUGE}
 - Control-plane replay oldest age (probe time): ${REPLAY_OLDEST_AGE_GAUGE}
+- Replay spike status: ${slo_c_replay_spike_status} (${replay_spike_budget_trigger})
 
 ## Weekly Ritual Checklist
 
@@ -529,16 +782,19 @@ Policy:
 ## Artifacts
 
 - Summary TSV: \`${OUT_DIR}/summary.tsv\`
+- Replay trend TSV: \`${OUT_DIR}/replay_daily_trend.tsv\`
 - API probes:
   - \`${OUT_DIR}/healthz.json\`
   - \`${OUT_DIR}/readyz.json\`
   - \`${OUT_DIR}/metrics.prom\`
   - \`${OUT_DIR}/timeline.json\`
+  - \`${OUT_DIR}/replay_history.json\`
 EOF
 
 echo "Weekly SLO review written:"
 echo "- $OUT_DIR/slo_weekly_report.md"
 echo "- $OUT_DIR/summary.tsv"
+echo "- $OUT_DIR/replay_daily_trend.tsv"
 
 if [[ "$FAIL_ON_BREACH" -eq 1 ]] && [[ "$ERROR_BUDGET_STATUS" == "RED" ]]; then
   echo "Error budget status is RED (fail-on-breach enabled)." >&2
