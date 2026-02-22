@@ -95,19 +95,19 @@ run_all_tools_present_case() {
   ./scripts/tooling_doctor.sh --strict --summary-file "$summary" >/dev/null
   # Keep compatibility with both historical ("detail") and newer ("details")
   # header spellings so contract tests do not flap on this non-breaking rename.
-  assert_file_contains "$summary" "^tool\\tstatus\\tdetails?$"
-  assert_file_contains "$summary" "^go\\tPASS\\t"
-  assert_file_contains "$summary" "^docker\\tPASS\\t"
-  assert_file_contains "$summary" "^shellcheck\\tPASS\\t"
-  assert_file_contains "$summary" "^staticcheck\\tPASS\\t"
-  assert_file_contains "$summary" "^govulncheck\\tPASS\\t"
+  assert_file_contains "$summary" $'^tool\tstatus\tdetails?$'
+  assert_file_contains "$summary" $'^go\tPASS\t'
+  assert_file_contains "$summary" $'^docker\tPASS\t'
+  assert_file_contains "$summary" $'^shellcheck\tPASS\t'
+  assert_file_contains "$summary" $'^staticcheck\tPASS\t'
+  assert_file_contains "$summary" $'^govulncheck\tPASS\t'
 }
 
 run_optional_missing_warn_case() {
   local summary="$tmp_dir/summary-warn.tsv"
   rm -f "$tmp_dir/bin/docker"
   ./scripts/tooling_doctor.sh --summary-file "$summary" >/dev/null
-  assert_file_contains "$summary" "^docker\\tWARN\\t"
+  assert_file_contains "$summary" $'^docker\tWARN\t'
 }
 
 run_optional_missing_strict_fail_case() {
@@ -119,7 +119,7 @@ run_optional_missing_strict_fail_case() {
   local rc=$?
   set -e
   assert_exit_nonzero "$rc" "strict mode with missing optional tools"
-  assert_file_contains "$summary" "^docker\\tFAIL\\t"
+  assert_file_contains "$summary" $'^docker\tFAIL\t'
 }
 
 run_unknown_arg_case() {

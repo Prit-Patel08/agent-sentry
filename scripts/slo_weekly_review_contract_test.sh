@@ -135,7 +135,7 @@ run_yellow_spike_case() {
   assert_file_contains "$out_dir/summary.tsv" $'^slo_c_replay_spike_status\tWARN$'
   assert_file_contains "$out_dir/summary.tsv" $'^error_budget_status\tYELLOW$'
   assert_file_contains "$out_dir/summary.tsv" $'^latest_replay_events\t6$'
-  assert_file_contains "$out_dir/replay_daily_trend.tsv" '^day\treplay_events\tconflict_events$'
+  assert_file_contains "$out_dir/replay_daily_trend.tsv" $'^day\treplay_events\tconflict_events$'
   assert_file_contains "$out_dir/slo_weekly_report.md" '^## Replay Trend Analysis$'
   assert_file_contains "$out_dir/slo_weekly_report.md" 'Replay/conflict daily spike'
 }
