@@ -8,6 +8,8 @@ Use this checklist before tagging any release.
 - [ ] `./scripts/smoke_local.sh` passes.
 - [ ] `./scripts/release_checkpoint.sh` passes.
 - [ ] If `FLOWFORGE_CLOUD_DEPS_REQUIRED=1`, API `/readyz` is healthy and reports `cloud_dependencies_required=true`.
+- [ ] Signed evidence bundle exported: `go run . evidence export --out-dir <release-artifact-dir>/evidence`.
+- [ ] Signed evidence bundle verified: `go run . evidence verify --bundle-dir <release-artifact-dir>/evidence`.
 - [ ] CI checks on `main` are green (`shellcheck`, `release-checkpoint-contract`, `backend` [build/test/race/vet/staticcheck/govulncheck], `dashboard`, `smoke`, `docker`, `sbom`).
 - [ ] No tracked secret/runtime artifacts in git index.
 - [ ] No unresolved high-severity security findings.

@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: help go-tools doctor doctor-summary doctor-strict contracts precommit hook hook-strict cloud-ready ops-snapshot
+.PHONY: help go-tools doctor doctor-summary doctor-strict contracts precommit hook hook-strict cloud-ready ops-snapshot evidence-bundle evidence-verify
 
 help:
 	@echo "FlowForge developer shortcuts:"
@@ -14,6 +14,8 @@ help:
 	@echo "  make hook-strict    - install strict managed pre-commit hook"
 	@echo "  make cloud-ready    - run cloud dependency + readyz smoke checks"
 	@echo "  make ops-snapshot   - generate ops status snapshot artifacts"
+	@echo "  make evidence-bundle - export signed evidence bundle (requires signing key env)"
+	@echo "  make evidence-verify BUNDLE_DIR=<path> - verify signed evidence bundle"
 
 go-tools:
 	./scripts/install_go_tools.sh
@@ -48,3 +50,10 @@ cloud-ready:
 
 ops-snapshot:
 	./scripts/ops_status_snapshot.sh
+
+evidence-bundle:
+	go run . evidence export
+
+evidence-verify:
+	@if [[ -z "$(BUNDLE_DIR)" ]]; then echo "BUNDLE_DIR is required"; exit 1; fi
+	go run . evidence verify --bundle-dir "$(BUNDLE_DIR)"

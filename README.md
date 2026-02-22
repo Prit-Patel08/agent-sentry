@@ -181,6 +181,14 @@ Generate one operational snapshot artifact bundle:
 make ops-snapshot
 ```
 
+Generate and verify signed evidence bundle:
+
+```bash
+export FLOWFORGE_EVIDENCE_SIGNING_KEY="replace-with-strong-key"
+make evidence-bundle
+make evidence-verify BUNDLE_DIR=pilot_artifacts/evidence-<timestamp>
+```
+
 One-command local gate:
 
 ```bash
@@ -219,6 +227,8 @@ Install strict hook mode: `./scripts/install_git_hook.sh --strict`.
 Git hook installer contract tests: `./scripts/install_git_hook_contract_test.sh`.
 Cloud dependency + readyz smoke: `./scripts/cloud_ready_smoke.sh`.
 Ops status snapshot artifact: `./scripts/ops_status_snapshot.sh`.
+Signed evidence export: `go run . evidence export`.
+Signed evidence verification: `go run . evidence verify --bundle-dir <path>`.
 
 Expected smoke output:
 - `Runaway detected in ...`
@@ -290,7 +300,10 @@ export FLOWFORGE_RESTART_BUDGET_WINDOW_SECONDS=300
 - either wait for the configured budget window, or raise `FLOWFORGE_RESTART_BUDGET_MAX` for your environment
 - API includes `Retry-After` header and `retry_after_seconds` field for operator retry timing
 
-4. Demo doesn’t trigger quickly
+4. Evidence export fails with signing-key error
+- set `FLOWFORGE_EVIDENCE_SIGNING_KEY` (or `FLOWFORGE_MASTER_KEY`) before running `flowforge evidence export`
+
+5. Demo doesn’t trigger quickly
 - run `./flowforge demo --max-cpu 30`
 
 ## Week 1 Ops

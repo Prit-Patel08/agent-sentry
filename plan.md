@@ -4965,6 +4965,7 @@ Build FlowForge into the trusted deterministic execution-control infrastructure 
 - [x] operator workflows consolidated (pinned go-tool installer, cloud-ready smoke, ops snapshot artifacts, command map)
 - [x] restart storm prevention guard enforced for manual/API restarts (budget window + 429 contract + metrics signal)
 - [x] integration API v1 implemented (`/v1/integrations/workspaces/*` with workspace registry, protection toggles, action control, latest incident endpoint)
+- [x] signed evidence export bundle implemented (manifest + HMAC signature + verify command + release gate integration)
 - [x] formal SLO dashboard operations in weekly ritual
 - [x] chaos drill evidence published
 - [x] external first-time usability validation completed

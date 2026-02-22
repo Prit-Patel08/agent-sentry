@@ -41,6 +41,8 @@ Use this file as the single command reference for day-to-day operation.
 |---|---|
 | Generate ops status snapshot | `./scripts/ops_status_snapshot.sh` |
 | Strict snapshot (doctor strict) | `./scripts/ops_status_snapshot.sh --strict-doctor` |
+| Export signed evidence bundle | `go run . evidence export --out-dir pilot_artifacts/evidence-<timestamp>` |
+| Verify signed evidence bundle | `go run . evidence verify --bundle-dir pilot_artifacts/evidence-<timestamp>` |
 
 ## 6) Release Workflow
 

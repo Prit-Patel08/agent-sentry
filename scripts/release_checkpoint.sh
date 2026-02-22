@@ -66,6 +66,8 @@ is_truthy() {
 cloud_readiness_status="SKIPPED (FLOWFORGE_CLOUD_DEPS_REQUIRED not enabled)"
 readyz_artifact=""
 readyz_url="${FLOWFORGE_API_BASE:-http://127.0.0.1:8080}/readyz"
+evidence_bundle_status="SKIPPED (FLOWFORGE_REQUIRE_EVIDENCE_BUNDLE not enabled)"
+evidence_bundle_dir=""
 
 if is_truthy "${FLOWFORGE_CLOUD_DEPS_REQUIRED:-0}"; then
   readyz_artifact="$REPORT_DIR/readyz.json"
@@ -94,6 +96,32 @@ if is_truthy "${FLOWFORGE_CLOUD_DEPS_REQUIRED:-0}"; then
   cloud_readiness_status="PASS"
 fi
 
+if is_truthy "${FLOWFORGE_REQUIRE_EVIDENCE_BUNDLE:-0}"; then
+  if [[ -z "${FLOWFORGE_EVIDENCE_SIGNING_KEY:-}" && -z "${FLOWFORGE_MASTER_KEY:-}" ]]; then
+    echo "Blocked: evidence bundle signing key is missing. Set FLOWFORGE_EVIDENCE_SIGNING_KEY (or FLOWFORGE_MASTER_KEY)." >&2
+    exit 1
+  fi
+
+  cli_cmd=()
+  if [[ -x "./flowforge" ]]; then
+    cli_cmd=(./flowforge)
+  elif command -v go >/dev/null 2>&1 && [[ -f "./main.go" ]]; then
+    cli_cmd=(go run .)
+  else
+    echo "Blocked: cannot execute flowforge CLI for evidence bundle generation." >&2
+    exit 1
+  fi
+
+  evidence_bundle_dir="$REPORT_DIR/evidence-bundle"
+  export_cmd=("${cli_cmd[@]}" evidence export --out-dir "$evidence_bundle_dir")
+  if [[ -n "${FLOWFORGE_EVIDENCE_INCIDENT_ID:-}" ]]; then
+    export_cmd+=(--incident-id "${FLOWFORGE_EVIDENCE_INCIDENT_ID}")
+  fi
+  "${export_cmd[@]}" >/dev/null
+  "${cli_cmd[@]}" evidence verify --bundle-dir "$evidence_bundle_dir" >/dev/null
+  evidence_bundle_status="PASS"
+fi
+
 cat > "$REPORT_FILE" <<EOF
 # Release Checkpoint
 
@@ -106,11 +134,13 @@ Date: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
 - Legacy naming scan: PASS
 - Operator docs present (runbook/pilot/release/rollback): PASS
 - Cloud dependency readiness gate: $cloud_readiness_status
+- Signed evidence bundle gate: $evidence_bundle_status
 
 ## Readiness Evidence
 
 - Ready endpoint: $readyz_url
 - Ready payload artifact: ${readyz_artifact:-N/A}
+- Evidence bundle artifact: ${evidence_bundle_dir:-N/A}
 
 ## Ready
 

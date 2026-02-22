@@ -77,6 +77,7 @@ make doctor-summary
 make contracts
 make precommit
 make ops-snapshot
+make evidence-bundle
 ```
 
 `make contracts` runs:
@@ -88,6 +89,14 @@ Cloud readiness smoke:
 
 ```bash
 ./scripts/cloud_ready_smoke.sh
+```
+
+Signed evidence bundle workflow:
+
+```bash
+export FLOWFORGE_EVIDENCE_SIGNING_KEY="replace-with-strong-key"
+go run . evidence export --out-dir pilot_artifacts/evidence-$(date +%Y%m%d-%H%M%S)
+go run . evidence verify --bundle-dir pilot_artifacts/evidence-<timestamp>
 ```
 
 Notes:
