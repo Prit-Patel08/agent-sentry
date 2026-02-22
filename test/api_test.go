@@ -495,8 +495,12 @@ func TestRestartEndpointEnforcesRestartBudget(t *testing.T) {
 	restartReq2.Header.Set("Authorization", "Bearer test-secret-key-12345")
 	restartW2 := httptest.NewRecorder()
 	api.HandleProcessRestart(restartW2, restartReq2)
-	if restartW2.Result().StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("expected restart status 429 when budget is exhausted, got %d", restartW2.Result().StatusCode)
+	resp2 := restartW2.Result()
+	if resp2.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected restart status 429 when budget is exhausted, got %d", resp2.StatusCode)
+	}
+	if retryHeader := resp2.Header.Get("Retry-After"); retryHeader == "" {
+		t.Fatalf("expected Retry-After header on restart budget response")
 	}
 
 	var errPayload map[string]interface{}
@@ -505,6 +509,10 @@ func TestRestartEndpointEnforcesRestartBudget(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(stringValue(errPayload["error"])), "restart budget exceeded") {
 		t.Fatalf("expected restart budget error message, got %#v", errPayload["error"])
+	}
+	retryAfter := intValue(errPayload["retry_after_seconds"])
+	if retryAfter <= 0 {
+		t.Fatalf("expected retry_after_seconds > 0, got %d", retryAfter)
 	}
 
 	metricsReq := httptest.NewRequest("GET", "/metrics", nil)
@@ -518,6 +526,95 @@ func TestRestartEndpointEnforcesRestartBudget(t *testing.T) {
 	if !ok || blocked < 1 {
 		t.Fatalf("expected flowforge_restart_budget_block_total >= 1, got %v (ok=%v)", blocked, ok)
 	}
+}
+
+func TestRestartBudgetAllowsRequestsAfterWindow(t *testing.T) {
+	setupTempDBForAPI(t)
+	api.ResetWorkerControlForTests()
+	os.Setenv("FLOWFORGE_API_KEY", "test-secret-key-12345")
+	defer os.Unsetenv("FLOWFORGE_API_KEY")
+	setEnvForTest(t, "FLOWFORGE_RESTART_BUDGET_MAX", "1")
+	setEnvForTest(t, "FLOWFORGE_RESTART_BUDGET_WINDOW_SECONDS", "1")
+
+	restartArgs := []string{"/bin/sh", "-c", "sleep 20"}
+	state.UpdateState(0, "", "STOPPED", "/bin/sh -c sleep 20", restartArgs, "", 0)
+
+	restartReq1 := httptest.NewRequest("POST", "/process/restart", nil)
+	restartReq1.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	restartW1 := httptest.NewRecorder()
+	api.HandleProcessRestart(restartW1, restartReq1)
+	if restartW1.Result().StatusCode != http.StatusAccepted {
+		t.Fatalf("expected first restart status 202, got %d", restartW1.Result().StatusCode)
+	}
+
+	var firstPID int
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		st := state.GetState()
+		if st.Status == "RUNNING" && st.PID > 0 {
+			firstPID = st.PID
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if firstPID == 0 {
+		t.Fatal("expected first restarted process pid > 0")
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(-firstPID, syscall.SIGKILL)
+		_ = syscall.Kill(firstPID, syscall.SIGKILL)
+	})
+
+	killReq := httptest.NewRequest("POST", "/process/kill", nil)
+	killReq.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	killW := httptest.NewRecorder()
+	api.HandleProcessKill(killW, killReq)
+	if killW.Result().StatusCode != http.StatusAccepted {
+		t.Fatalf("expected kill status 202, got %d", killW.Result().StatusCode)
+	}
+	stopDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(stopDeadline) {
+		if state.GetState().Status == "STOPPED" {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	restartReq2 := httptest.NewRequest("POST", "/process/restart", nil)
+	restartReq2.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	restartW2 := httptest.NewRecorder()
+	api.HandleProcessRestart(restartW2, restartReq2)
+	if restartW2.Result().StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected second restart status 429 during active budget window, got %d", restartW2.Result().StatusCode)
+	}
+
+	time.Sleep(1200 * time.Millisecond)
+
+	restartReq3 := httptest.NewRequest("POST", "/process/restart", nil)
+	restartReq3.Header.Set("Authorization", "Bearer test-secret-key-12345")
+	restartW3 := httptest.NewRecorder()
+	api.HandleProcessRestart(restartW3, restartReq3)
+	if restartW3.Result().StatusCode != http.StatusAccepted {
+		t.Fatalf("expected third restart status 202 after budget window, got %d", restartW3.Result().StatusCode)
+	}
+
+	var secondPID int
+	secondDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(secondDeadline) {
+		st := state.GetState()
+		if st.Status == "RUNNING" && st.PID > 0 && st.PID != firstPID {
+			secondPID = st.PID
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if secondPID == 0 {
+		t.Fatal("expected second restarted process pid > 0")
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(-secondPID, syscall.SIGKILL)
+		_ = syscall.Kill(secondPID, syscall.SIGKILL)
+	})
 }
 
 func TestKillAndRestartConflictDuringStop(t *testing.T) {

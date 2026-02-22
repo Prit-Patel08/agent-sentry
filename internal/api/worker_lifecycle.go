@@ -66,14 +66,26 @@ type lifecycleAction struct {
 }
 
 type lifecycleError struct {
-	code int
-	msg  string
+	code              int
+	msg               string
+	retryAfterSeconds int
 }
 
 func (e *lifecycleError) Error() string { return e.msg }
 
 func newLifecycleError(code int, msg string) error {
 	return &lifecycleError{code: code, msg: msg}
+}
+
+func newLifecycleErrorWithRetry(code int, msg string, retryAfterSeconds int) error {
+	if retryAfterSeconds < 0 {
+		retryAfterSeconds = 0
+	}
+	return &lifecycleError{
+		code:              code,
+		msg:               msg,
+		retryAfterSeconds: retryAfterSeconds,
+	}
 }
 
 type workerLifecycle struct {
@@ -273,10 +285,11 @@ func (w *workerLifecycle) requestRestart() (lifecycleAction, error) {
 			windowSeconds = restartBudgetDefaultWindowSeconds
 		}
 		msg := fmt.Sprintf("restart budget exceeded: allowed %d restart requests per %ds", budget.Max, windowSeconds)
+		retryAfter := w.restartBudgetRetryAfterLocked(budget, now)
 		w.lastErr = msg
 		apiMetrics.IncRestartBudgetBlocked()
 		emitLifecycleTransition(w.phase, w.operation, w.pid, w.managed, msg, "restart_budget_blocked")
-		return lifecycleAction{}, newLifecycleError(429, msg)
+		return lifecycleAction{}, newLifecycleErrorWithRetry(429, msg, retryAfter)
 	}
 	w.recordRestartAttemptLocked(now)
 
@@ -575,6 +588,25 @@ func (w *workerLifecycle) pruneRestartHistoryLocked(window time.Duration, now ti
 	w.restartHistory = keep
 }
 
+func (w *workerLifecycle) restartBudgetRetryAfterLocked(cfg restartBudgetConfig, now time.Time) int {
+	if cfg.Max <= 0 || cfg.Window <= 0 || len(w.restartHistory) == 0 {
+		return 0
+	}
+	oldest := w.restartHistory[0]
+	wait := oldest.Add(cfg.Window).Sub(now)
+	if wait <= 0 {
+		return 1
+	}
+	seconds := int(wait.Seconds())
+	if wait > time.Duration(seconds)*time.Second {
+		seconds++
+	}
+	if seconds < 1 {
+		seconds = 1
+	}
+	return seconds
+}
+
 func processLikelyAlive(pid int) bool {
 	if pid <= 0 {
 		return false
@@ -635,4 +667,15 @@ func lifecycleErrorMessage(err error, fallback string) string {
 		return lerr.msg
 	}
 	return fmt.Sprintf("internal lifecycle error: %v", err)
+}
+
+func lifecycleRetryAfter(err error) int {
+	if err == nil {
+		return 0
+	}
+	var lerr *lifecycleError
+	if errors.As(err, &lerr) {
+		return lerr.retryAfterSeconds
+	}
+	return 0
 }

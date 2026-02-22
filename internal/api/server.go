@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -487,7 +488,22 @@ func HandleProcessRestart(w http.ResponseWriter, r *http.Request) {
 	workerControl.registerSpecFromStateIfMissing()
 	decision, err := requestLifecycleRestart()
 	if err != nil {
-		writeJSONError(w, lifecycleHTTPCode(err, http.StatusInternalServerError), lifecycleErrorMessage(err, "failed to request restart"))
+		statusCode := lifecycleHTTPCode(err, http.StatusInternalServerError)
+		msg := lifecycleErrorMessage(err, "failed to request restart")
+		if statusCode == http.StatusTooManyRequests {
+			stats := state.GetState()
+			incidentID := uuid.NewString()
+			_ = database.LogAuditEventWithIncident(actorFromRequest(r), "RESTART_BLOCKED", msg, "api", stats.PID, stats.Command, incidentID)
+		}
+		if retryAfter := lifecycleRetryAfter(err); retryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+			writeJSON(w, statusCode, map[string]interface{}{
+				"error":               msg,
+				"retry_after_seconds": retryAfter,
+			})
+			return
+		}
+		writeJSONError(w, statusCode, msg)
 		return
 	}
 

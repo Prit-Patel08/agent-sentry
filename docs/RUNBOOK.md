@@ -80,6 +80,11 @@ Guardrail:
 - If a worker is still running, API returns `409` and you should run `/process/kill` first.
 - If restart budget is exhausted, API returns `429` until the budget window expires.
 
+Blocked restart response contract:
+- HTTP `429`
+- header: `Retry-After: <seconds>`
+- body: `{"error":"restart budget exceeded: ...","retry_after_seconds":<n>}`
+
 ```bash
 curl -X POST \
   -H "Authorization: Bearer $FLOWFORGE_API_KEY" \

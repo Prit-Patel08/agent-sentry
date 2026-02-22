@@ -282,6 +282,7 @@ export FLOWFORGE_RESTART_BUDGET_WINDOW_SECONDS=300
 
 3. Restart returns `429 restart budget exceeded`
 - either wait for the configured budget window, or raise `FLOWFORGE_RESTART_BUDGET_MAX` for your environment
+- API includes `Retry-After` header and `retry_after_seconds` field for operator retry timing
 
 4. Demo doesn’t trigger quickly
 - run `./flowforge demo --max-cpu 30`
